@@ -1,0 +1,36 @@
+# Core Django & REST Framework
+Django>=4.2
+djangorestframework>=3.14.0
+django-environ>=0.10.0
+djangorestframework-simplejwt>=5.2.2
+
+# Database (PostgreSQL or SQLite)
+psycopg2-binary>=2.9.5  # Required for PostgreSQL
+
+# Image Processing (LIGHTER alternatives for deployment)
+# Image Processing (LIGHTER alternatives for deployment)
+# Note: face-recognition and dlib may take time to build
+opencv-python-headless>=4.8.0.76
+face-recognition>=1.3.0
+numpy>=1.23.5
+pillow>=9.4.0
+
+# Cryptography & Security
+cryptography>=42.0.0
+argon2-cffi>=21.3.0  # Secure password hashing
+
+# CORS & Permissions
+django-cors-headers>=4.0.0
+django-filter>=23.2
+django-extensions>=3.2.0
+
+# Development & Debugging
+black>=23.1.0  # Code formatting
+flake8>=6.1.0  # Linting
+pytest-django>=4.5.2  # Testing
+
+# Production Server
+gunicorn>=21.2.0  # WSGI HTTP Server
+whitenoise>=6.6.0  # Static file serving
+dj-database-url>=2.1.0  # Database URL parsing
+python-decouple>=3.8  # Environment variable management

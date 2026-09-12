@@ -1,0 +1,268 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #3B82F6;
+  --primary-dark: #2563EB;
+  --secondary: #10B981;
+  --secondary-dark: #059669;
+  --danger: #EF4444;
+  --warning: #F59E0B;
+  --dark: #111827;
+  --dark-light: #1F2937;
+  --light: #F9FAFB;
+  --gray-light: #E5E7EB;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  background-color: var(--dark);
+  color: var(--light);
+  min-height: 100vh;
+}
+
+/* Modern Glass Morphism Cards */
+.glass-card {
+  background: rgba(31, 41, 55, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.36);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.glass-card:hover {
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.45);
+  transform: translateY(-3px);
+}
+
+/* Enhanced Card Variations */
+.glass-card-success {
+  border-left: 4px solid var(--secondary);
+}
+
+.glass-card-info {
+  border-left: 4px solid var(--primary);
+}
+
+.glass-card-warning {
+  border-left: 4px solid var(--warning);
+}
+
+.glass-card-danger {
+  border-left: 4px solid var(--danger);
+}
+
+/* Smooth Transitions */
+.smooth-transition {
+  transition: all 0.3s ease;
+}
+
+/* Modern Button Styles */
+.btn-modern {
+  @apply px-6 py-2.5 rounded-lg font-medium transition-all duration-300 transform;
+}
+
+.btn-primary {
+  @apply bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-blue-500/50 hover:-translate-y-1;
+}
+
+.btn-secondary {
+  @apply bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg hover:shadow-emerald-500/50 hover:-translate-y-1;
+}
+
+.btn-danger {
+  @apply bg-red-600 hover:bg-red-700 text-white shadow-lg hover:shadow-red-500/50 hover:-translate-y-1;
+}
+
+.btn-warning {
+  @apply bg-amber-600 hover:bg-amber-700 text-white shadow-lg hover:shadow-amber-500/50 hover:-translate-y-1;
+}
+
+.btn-outline {
+  @apply border-2 border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white hover:-translate-y-1;
+}
+
+.btn-ghost {
+  @apply bg-transparent hover:bg-gray-800 text-gray-300 border border-gray-700 hover:border-gray-600;
+}
+
+/* Modern Inputs */
+.input-modern {
+  @apply w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg text-white 
+  focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent 
+  transition-all duration-300;
+}
+
+/* Input with left icon - Fixed padding to prevent overlap */
+.input-icon-left {
+  @apply pl-10;
+}
+
+/* Input with right icon - Fixed padding to prevent overlap */
+.input-icon-right {
+  @apply pr-10;
+}
+
+/* Icon positioning containers */
+.icon-container-left {
+  @apply absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none;
+}
+
+.icon-container-right {
+  @apply absolute inset-y-0 right-0 pr-3 flex items-center cursor-pointer;
+}
+
+/* Modern Badge Styles */
+.badge {
+  @apply px-2.5 py-0.5 rounded-full text-xs font-medium inline-flex items-center;
+}
+
+.badge-blue {
+  @apply bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300;
+}
+
+.badge-green {
+  @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300;
+}
+
+.badge-red {
+  @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300;
+}
+
+.badge-yellow {
+  @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300;
+}
+
+.badge-purple {
+  @apply bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300;
+}
+
+/* Gradient Backgrounds */
+.bg-gradient-blue-purple {
+  @apply bg-gradient-to-r from-blue-600 to-purple-600;
+}
+
+.bg-gradient-green-blue {
+  @apply bg-gradient-to-r from-green-500 to-blue-500;
+}
+
+.bg-gradient-orange-red {
+  @apply bg-gradient-to-r from-orange-500 to-red-500;
+}
+
+.bg-gradient-dark {
+  @apply bg-gradient-to-b from-gray-900 to-gray-800;
+}
+
+/* Enhanced Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.animate-slideUp {
+  animation: slideUp 0.5s ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-slow {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-bounce-slow {
+  animation: bounce 2s infinite;
+}
+
+/* Enhanced Tables */
+.table-modern {
+  @apply w-full bg-gray-800 text-white rounded-lg overflow-hidden border border-gray-700;
+}
+
+.table-modern th {
+  @apply py-3 px-4 text-left font-semibold bg-gray-900;
+}
+
+.table-modern td {
+  @apply py-3 px-4 border-t border-gray-700;
+}
+
+.table-modern tr:hover {
+  @apply bg-gray-700;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--dark-light);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(59, 130, 246, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(59, 130, 246, 0.8);
+}
+
+/* Copy button with tooltip */
+.copy-button {
+  @apply relative inline-flex items-center justify-center p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-gray-700;
+}
+
+.copy-button::after {
+  content: "Copy";
+  @apply absolute -top-8 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 transition-opacity duration-300;
+  pointer-events: none;
+}
+
+.copy-button:hover::after {
+  @apply opacity-100;
+}
+
+/* Add progress bar animation */
+@keyframes progress {
+  0% { width: 0%; }
+  50% { width: 70%; }
+  100% { width: 100%; }
+}
+
+.animate-progress-bar {
+  animation: progress 2s ease-in-out infinite;
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

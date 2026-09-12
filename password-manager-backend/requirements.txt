@@ -1,0 +1,28 @@
+# Core Django & REST Framework
+Django>=4.2
+djangorestframework>=3.14.0
+django-environ>=0.10.0
+djangorestframework-simplejwt>=5.2.2
+
+# Database (PostgreSQL or SQLite)
+psycopg2-binary>=2.9.5  # Required for PostgreSQL
+# sqlite3 is part of Python's standard library, no need to install
+
+# Face Recognition & Image Processing
+opencv-python>=4.8.0.76
+face-recognition>=1.3.0
+numpy>=1.23.5
+pillow>=9.4.0
+
+# Cryptography & Security
+cryptography>=42.0.0
+argon2-cffi>=21.3.0  # Secure password hashing
+
+# CORS & Permissions
+django-cors-headers>=4.0.0
+django-filter>=23.2
+
+# Development & Debugging
+black>=23.1.0  # Code formatting
+flake8>=6.1.0  # Linting
+pytest-django>=4.5.2  # Testing
