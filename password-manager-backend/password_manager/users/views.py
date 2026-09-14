@@ -1,563 +1,197 @@
-import os
-import pyotp
-import numpy as np
-from io import BytesIO
-from PIL import Image as PILImage
-try:
-    import face_recognition
-    FACE_RECOGNITION_AVAILABLE = True
-except ImportError:
-    FACE_RECOGNITION_AVAILABLE = False
-    face_recognition = None
-from pathlib import Path
-from datetime import datetime
+import json
+import secrets
+from datetime import timedelta
+from time import time
 
 from django.conf import settings
-from rest_framework import status
+from django.contrib.auth import login, logout
+from django.contrib.auth.hashers import make_password
 from django.core.mail import send_mail
-from django.utils.http import urlsafe_base64_encode
-from django.template.loader import render_to_string
-from django.contrib.auth.decorators import login_required
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse
-from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import check_password
-from rest_framework import status, permissions
+from django.middleware.csrf import get_token, rotate_token
+from django.utils import timezone
+from django.utils.crypto import constant_time_compare, salted_hmac
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.debug import sensitive_post_parameters
+from rest_framework import generics
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.permissions import IsAuthenticated, AllowAny
-from rest_framework.decorators import api_view, permission_classes
 
-from .serializers import (
-    UserSignupSerializer,
-    UserSerializer,
-    PasswordSerializer,
-    ImageUploadSerializer,
-    ImageSerializer,
-)
-from .models import Password, CustomUser, Image
-
-User = get_user_model()  # Get custom user model
+from . import biometrics
+from .models import CustomUser, Password, BiometricTemplate
+from .permissions import VaultUnlocked, OTPVerified
+from .serializers import UserSignupSerializer, LoginSerializer, OTPSerializer, UserSerializer, PasswordSerializer, PasswordReadSerializer
 
 
-# ✅ Signup API with Face Image Processing & Secure Storage
-class SignupView(APIView):
-    permission_classes = [permissions.AllowAny]
-    serializer_class = UserSignupSerializer
-
-    def post(self, request):
-        serializer = self.serializer_class(data=request.data)
-        
-        # Print request data for debugging
-        print("Signup request data:", request.data)
-
-        if serializer.is_valid():
-            validated_data = serializer.validated_data
-            validated_data["email"] = validated_data["email"].strip().lower()
-
-            if User.objects.filter(email=validated_data["email"]).exists():
-                return Response(
-                    {"error": "Email already registered!"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            user = serializer.save()
-
-            refresh = RefreshToken.for_user(user)
-
-            return Response(
-                {
-                    "message": "Signup successful!",
-                    "token": str(refresh.access_token),
-                    "refresh": str(refresh),
-                    "token_expires_in": refresh.access_token.payload["exp"],
-                    "user": {
-                        "id": user.id,
-                        "username": user.username,
-                        "email": user.email,
-                    },
-                },
-                status=status.HTTP_201_CREATED,
-            )
-
-        # Print detailed validation errors
-        print("Validation errors:", serializer.errors)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+def csrf_failure(request, reason=''):
+    return JsonResponse({'detail': 'CSRF verification failed. Reload and try again.'}, status=403)
 
 
-# ✅ Login API (Authenticates User Securely)
-class LoginView(APIView):
-    permission_classes = [permissions.AllowAny]
-
-    def post(self, request):
-        email = request.data.get("email", "").strip().lower()  # ✅ Convert to lowercase
-        password = request.data.get("password")
-
-        if not email or not password:
-            return Response(
-                {"error": "Email and Password are required!"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            user = User.objects.get(
-                email__iexact=email
-            )  # Case-insensitive email lookup
-        except User.DoesNotExist:
-            return Response(
-                {"error": "Invalid credentials!"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if not check_password(password, user.password):  # Verify the hashed password
-            return Response(
-                {"error": "Invalid credentials!"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Generate JWT Token
-        refresh = RefreshToken.for_user(user)
-
-        return Response(
-            {
-                "message": "Login successful!",
-                "token": str(refresh.access_token),
-                "refresh": str(refresh),
-                "token_expires_in": refresh.access_token.payload["exp"],
-                "user": {
-                    "id": user.id,
-                    "username": user.username,
-                    "email": user.email,
-                },
-            },
-            status=status.HTTP_200_OK,
-        )
+def health(request):
+    return JsonResponse({'status': 'ok'})
 
 
-# ✅ User Profile API (Fetches Logged-in User Details)
-class UserDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+@method_decorator(sensitive_post_parameters('password', 'otp', 'image'), name='dispatch')
+@method_decorator(csrf_protect, name='dispatch')
+class ProtectedAPIView(APIView):
+    """Enforce CSRF even on anonymous login/signup endpoints."""
 
+class CSRFView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
     def get(self, request):
-        user = request.user
-        serializer = UserSerializer(user)
-        return Response(serializer.data)
+        return Response({'csrfToken': get_token(request)})
 
-
-# ✅ Root API (Provide basic API info)
-@api_view(["GET"])
-@permission_classes([AllowAny])  # No authentication required for this view
-def api_root(request):
-    return Response(
-        {
-            "message": "Welcome to the API!",
-            "endpoints": {
-                "users": "/api/users/",
-                "signup": "/api/signup/",
-                "login": "/api/login/",
-                "me": "/api/me/",
-                "passwords": "/api/passwords/",
-            },
-        }
-    )
-
-
-# ✅ Add Password API (Allow authenticated users to add a password)
-@api_view(["POST"])
-@permission_classes(
-    [IsAuthenticated]
-)  # Ensure only authenticated users can add passwords
-def add_password(request):
-    """Allow authenticated users to add a password."""
-    # Check if 'domain_name' and 'password' are provided in the request
-    if "domain_name" not in request.data or "password" not in request.data:
-        return Response(
-            {"error": "domain_name and password are required."},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    # Create serializer to validate and save the password data
-    serializer = PasswordSerializer(data=request.data)
-
-    # Validate and save the password
-    if serializer.is_valid():
+class SignupView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = 'signup'
+    def post(self, request):
+        serializer = UserSignupSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         try:
-            # Save the password for the authenticated user
-            serializer.save(user=request.user)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            # Handle errors during saving the password
-            return Response(
-                {"error": f"Error saving password: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-    else:
-        # Return validation errors if the serializer is not valid
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            with transaction.atomic():
+                serializer.save()
+        except IntegrityError:
+            return Response({'detail': 'Unable to register with these details.'}, status=400)
+        return Response({'message': 'Account created. Please log in.'}, status=201)
+
+class LoginView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_scope = 'login'
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = CustomUser.objects.filter(email__iexact=serializer.validated_data['email'].strip()).first()
+        if not user:
+            make_password(serializer.validated_data['password'])
+        if not user or not user.check_password(serializer.validated_data['password']) or not user.is_active:
+            return Response({'detail': 'Invalid credentials.'}, status=401)
+        request.session.flush()
+        login(request, user, backend='django.contrib.auth.backends.ModelBackend')
+        request.session['login_at'] = time()
+        return Response({'user': UserSerializer(user).data, 'csrfToken': get_token(request)})
+
+class LogoutView(ProtectedAPIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    def post(self, request):
+        logout(request)
+        rotate_token(request)
+        return Response({'message': 'Logged out.', 'csrfToken': get_token(request)})
+
+class UserDetailView(ProtectedAPIView):
+    def get(self, request):
+        data = UserSerializer(request.user).data
+        data.update({'face_enrolled': BiometricTemplate.objects.filter(user=request.user).exists(),
+                     'vault_unlocked': VaultUnlocked().has_permission(request, self)})
+        return Response(data)
+
+class LockView(ProtectedAPIView):
+    def post(self, request):
+        request.session.pop('vault_until', None)
+        request.session.pop('vault_factor', None)
+        return Response({'message': 'Vault locked.'})
 
 
-# ✅ Fetch Password API (Allow authenticated users to fetch passwords)
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated])
-# def get_passwords(request):
-#     """Allow authenticated users to get their passwords."""
-#     passwords = Password.objects.filter(
-#         user=request.user
-#     )  # Fetch passwords for authenticated user
-#     serializer = PasswordSerializer(passwords, many=True)
-#     return Response(serializer.data)
+def session_digest(request):
+    return salted_hmac('otp-session', request.session.session_key or '').hexdigest()
 
+def otp_digest(user_id, session, code):
+    return salted_hmac('vault-email-code', f'{user_id}:{session}:{code}', algorithm='sha256').hexdigest()
 
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def verify_otp(request):
-    """Allow authenticated users to view or add passwords."""
-    if request.method == "GET":
-        otp = request.query_params.get("otp")  # Get OTP from query params
+def unlock(request, factor):
+    request.session['vault_until'] = time() + settings.VAULT_UNLOCK_SECONDS
+    request.session['vault_factor'] = factor
 
-        if not otp:
-            return Response(
-                {"error": "OTP is required"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # # Generate OTP
-        user = request.user
-        print("OPT", otp, user.otp_generated)
-        totp = pyotp.TOTP(user.otp_secret)  # Use the user's OTP secret
-
-        # Now verify OTP entered by the user
-        if str(user.otp_generated) != str(otp):
-            return Response(
-                {"error": "Invalid OTP"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Fetch passwords if OTP is valid
-        passwords = Password.objects.filter(user=request.user)
-        serializer = PasswordSerializer(passwords, many=True)
-        return Response(serializer.data)
-
-
-# totp = pyotp.TOTP(user.otp_secret, interval=30)
-
-
-@api_view(["GET"])
-@permission_classes([IsAuthenticated])
-def send_otp_email(request):
-    try:
-        user = request.user  # Get the logged-in user
-
-        # Generate or fetch OTP secret
-        otp_secret = (
-            user.generate_otp_secret()
-        )  # Generate OTP secret if not already done
-
-        # Generate OTP for the user
-        totp = pyotp.TOTP(otp_secret)
-        generated_otp = totp.now()  # Generate the OTP
-
-        # Store OTP in the user model (or session for simplicity)
-        user.otp_generated = generated_otp  # Save OTP for comparison later
-        user.save()
-
-        # Send the OTP to the user's email
-        send_mail(
-            "Your OTP for Password Access",
-            f"Your OTP for accessing your passwords is: {generated_otp}",
-            settings.DEFAULT_FROM_EMAIL,  # Sender email (from your settings)
-            [user.email],  # Recipient's email
-            fail_silently=False,
-        )
-
-        return Response(
-            {
-                "message": "OTP sent successfully to your email!",
-                "user": {"email": user.email},
-            },
-            status=200,
-        )
-
-    except Exception as e:
-        return Response({"error": str(e)}, status=400)
-
-
-# @api_view(["GET"])
-# @permission_classes([IsAuthenticated])
-# def verify_otp(request):
-#     """Verify OTP for the logged-in user"""
-#     otp = request.query_params.get("otp")  # Get the OTP from query params
-
-#     if not otp:
-#         return Response({"error": "OTP is required."}, status=400)
-
-#     user = request.user  # Get the logged-in user
-
-#     # Verify the OTP with the stored OTP
-#     if user.otp_generated == otp:
-#         # OTP is correct, fetch passwords for the user
-#         passwords = Password.objects.filter(
-#             user=user
-#         )  # Fetch passwords for authenticated user
-#         serializer = PasswordSerializer(passwords, many=True)
-#         return Response(serializer.data, status=200)
-#     else:
-#         return Response({"error": "Invalid OTP."}, status=400)
-
-
-class ImageUploadView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, *args, **kwargs):
-        # Ensure the request includes the image file
-        if not FACE_RECOGNITION_AVAILABLE:
-            return Response(
-                {"error": "Face recognition is not available. Please install dlib and face_recognition."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        
-        user = request.user
-        print(f"Processing image upload for user: {user.username}")
-
-        if "image" not in request.FILES:
-            return Response(
-                {"error": "No image provided."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        file = request.FILES["image"]
-        print(f"Received image file: {file.name}, size: {file.size} bytes")
-
-        # Validate that the uploaded file contains a clear face
+class SendOTPView(ProtectedAPIView):
+    throttle_scope = 'otp_send'
+    def post(self, request):
+        now = timezone.now()
+        with transaction.atomic():
+            user = CustomUser.objects.select_for_update().get(pk=request.user.pk)
+            if user.otp_sent_at and (now - user.otp_sent_at).total_seconds() < settings.OTP_RESEND_SECONDS:
+                return Response({'detail': 'Wait before requesting another code.'}, status=429)
+            code = f'{secrets.randbelow(1_000_000):06d}'
+            user.otp_session = session_digest(request)
+            user.otp_digest = otp_digest(user.pk, user.otp_session, code)
+            user.otp_expires_at = now + timedelta(seconds=settings.OTP_TTL_SECONDS)
+            user.otp_sent_at, user.otp_attempts = now, 0
+            user.otp_secret = user.otp_generated = None
+            user.save(update_fields=['otp_session', 'otp_digest', 'otp_expires_at', 'otp_sent_at', 'otp_attempts', 'otp_secret', 'otp_generated'])
+            digest = user.otp_digest
         try:
-            # Reset file pointer to beginning
-            file.seek(0)
-            # Load the image using PIL first, then convert to numpy array
-            # This ensures compatibility with Django's UploadedFile
-            pil_image = PILImage.open(file)
-            # Convert PIL image to RGB if necessary (face_recognition expects RGB)
-            if pil_image.mode != 'RGB':
-                pil_image = pil_image.convert('RGB')
-            # Convert to numpy array
-            image = np.array(pil_image)
-            # Reset file pointer again for saving later
-            file.seek(0)
-            
-            # Detect faces
-            face_locations = face_recognition.face_locations(image)
-            
-            print(f"Face locations detected: {face_locations}")
-            
-            # Check if any face was detected
-            if not face_locations:
-                return Response(
-                    {"error": "No face detected in the uploaded image. Please provide a clear image of your face."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            # Check if multiple faces were detected
-            if len(face_locations) > 1:
-                return Response(
-                    {"error": f"Multiple faces ({len(face_locations)}) detected in the image. Please provide an image with only your face."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            
-            # Try to generate a face encoding to ensure the face is clear enough
-            face_encodings = face_recognition.face_encodings(image, face_locations)
-            if not face_encodings:
-                return Response(
-                    {"error": "Could not generate face encoding. Please provide a clearer image of your face."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-                
-            print("Face validation successful")
-            
-            # Reset file pointer for saving
-            file.seek(0)
-            
-            # Read the file content as bytes
-            image_bytes = file.read()
-            content_type = file.content_type or 'image/png'
-            filename = file.name or 'face.png'
+            delivered = send_mail('Your BioPass verification code', f'Your verification code is {code}. It expires in five minutes.',
+                                 settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)
+            if delivered != 1:
+                raise RuntimeError
+        except Exception:
+            CustomUser.objects.filter(pk=user.pk, otp_digest=digest).update(otp_digest='', otp_expires_at=None)
+            return Response({'detail': 'Email could not be delivered. Try again later.'}, status=503)
+        return Response({'message': 'A verification code has been sent.'})
 
-            # Create an image instance and save the image data to database
-            try:
-                # Delete previous face image if it exists
-                try:
-                    previous_image = Image.objects.get(user=user)
-                    previous_image.delete()
-                    print(f"Deleted previous face image for user: {user.username}")
-                except Image.DoesNotExist:
-                    pass
+class VerifyOTPView(ProtectedAPIView):
+    throttle_scope = 'otp_verify'
+    def post(self, request):
+        serializer = OTPSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            user = CustomUser.objects.select_for_update().get(pk=request.user.pk)
+            valid = (user.otp_digest and user.otp_expires_at and user.otp_expires_at > timezone.now()
+                     and user.otp_attempts < settings.OTP_MAX_ATTEMPTS
+                     and constant_time_compare(user.otp_session, session_digest(request))
+                     and constant_time_compare(user.otp_digest, otp_digest(user.pk, user.otp_session, serializer.validated_data['otp'])))
+            user.otp_attempts = min(user.otp_attempts + 1, settings.OTP_MAX_ATTEMPTS)
+            if valid or user.otp_attempts >= settings.OTP_MAX_ATTEMPTS:
+                user.otp_digest, user.otp_expires_at = '', None
+            user.save(update_fields=['otp_attempts', 'otp_digest', 'otp_expires_at'])
+        if not valid:
+            return Response({'detail': 'Invalid or expired verification code.'}, status=400)
+        unlock(request, 'otp')
+        return Response({'message': 'Vault unlocked for five minutes.'})
 
-                # Create new image instance with binary data
-                image_instance = Image(
-                    user=user,
-                    image_data=image_bytes,
-                    filename=filename,
-                    content_type=content_type
-                )
-                image_instance.save()
-                print(f"New face image saved successfully to database for user: {user.username}")
+class PasswordListView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, VaultUnlocked]
+    def get_queryset(self):
+        return Password.objects.filter(user=self.request.user).order_by('pk')
+    def get_serializer_class(self):
+        return PasswordReadSerializer if self.request.method == 'GET' else PasswordSerializer
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
 
-                # Return success response
-                return Response(
-                    {
-                        "message": "Face image uploaded successfully!",
-                        "image_id": image_instance.id,
-                    },
-                    status=status.HTTP_201_CREATED,
-                )
-            except Exception as e:
-                print(f"Error saving image: {str(e)}")
-                return Response(
-                    {"error": f"Error saving image: {str(e)}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-        except Exception as e:
-            import traceback
-            error_traceback = traceback.format_exc()
-            print(f"Error processing image: {str(e)}")
-            print(f"Traceback: {error_traceback}")
-            return Response(
-                {"error": f"Error processing image: {str(e)}", "details": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+class PasswordDetailView(generics.RetrieveUpdateDestroyAPIView):
+    permission_classes = [IsAuthenticated, VaultUnlocked]
+    def get_queryset(self):
+        return Password.objects.filter(user=self.request.user)
+    def get_serializer_class(self):
+        return PasswordReadSerializer if self.request.method == 'GET' else PasswordSerializer
 
+class FaceStatusView(ProtectedAPIView):
+    def get(self, request):
+        return Response({'enrolled': BiometricTemplate.objects.filter(user=request.user).exists()})
 
-class ImageListView(APIView):
-    permission_classes = [IsAuthenticated]
+class FaceEnrollView(ProtectedAPIView):
+    permission_classes = [IsAuthenticated, OTPVerified]
+    throttle_scope = 'face'
+    def post(self, request):
+        encoding = biometrics.extract_encoding(request.FILES.get('image'))
+        with transaction.atomic():
+            CustomUser.objects.select_for_update().get(pk=request.user.pk)
+            BiometricTemplate.objects.update_or_create(user=request.user, defaults={'encoding': json.dumps(encoding)})
+        return Response({'message': 'Face verification enrolled.'}, status=201)
 
-    def get(self, request, *args, **kwargs):
-        user = request.user
-        image = Image.objects.get(user=user)
-        if not image:
-            return Response({"status": False, status: 404})
-        serializer = ImageSerializer(image)
-        return Response(serializer.data)
-
-
-class VerifyFaceId(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, *args, **kwargs):
-        if not FACE_RECOGNITION_AVAILABLE:
-            return Response(
-                {"error": "Face recognition is not available. Please install dlib and face_recognition."},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        
-        try:
-            user = request.user
-
-            if "image" not in request.FILES:
-                return Response(
-                    {"error": "No image provided."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            uploaded_image = request.FILES["image"]
-
-            # Get faceId from DB
-            try:
-                image = Image.objects.get(user=user)
-            except Image.DoesNotExist:
-                return Response(
-                    {"error": "No face ID found for this user. Please set up Face ID first."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-
-            # Process uploaded image
-            try:
-                # Reset file pointer
-                uploaded_image.seek(0)
-                # Load using PIL for better compatibility
-                pil_image1 = PILImage.open(uploaded_image)
-                if pil_image1.mode != 'RGB':
-                    pil_image1 = pil_image1.convert('RGB')
-                image1 = np.array(pil_image1)
-                
-                face_locations1 = face_recognition.face_locations(image1)
-                
-                print(f"Uploaded image face locations: {face_locations1}")
-                
-                if not face_locations1:
-                    return Response(
-                        {"error": "No face detected in the uploaded image."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                
-                if len(face_locations1) > 1:
-                    print(f"WARNING: Multiple faces ({len(face_locations1)}) detected in uploaded image")
-                    return Response(
-                        {"error": f"Multiple faces ({len(face_locations1)}) detected in the uploaded image. Please ensure only your face is visible."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                
-                face_encoding1 = face_recognition.face_encodings(image1, face_locations1)[0]
-                print(f"Uploaded face encoding generated successfully")
-            except Exception as e:
-                print(f"Error processing uploaded image: {str(e)}")
-                return Response(
-                    {"error": f"Error processing uploaded image: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Process saved faceId image from database
-            try:
-                print(f"Loading saved image from database for user: {user.username}")
-                
-                # Get image bytes from database
-                image_bytes = image.get_image_bytes()
-                if not image_bytes:
-                    return Response(
-                        {"error": "No image data found in database."},
-                        status=status.HTTP_404_NOT_FOUND,
-                    )
-                
-                # Load image from bytes using PIL
-                pil_image2 = PILImage.open(BytesIO(image_bytes))
-                if pil_image2.mode != 'RGB':
-                    pil_image2 = pil_image2.convert('RGB')
-                image2 = np.array(pil_image2)
-                
-                face_locations2 = face_recognition.face_locations(image2)
-                
-                print(f"Saved image face locations: {face_locations2}")
-                
-                if not face_locations2:
-                    return Response(
-                        {"error": "No face detected in the saved face ID image."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                
-                if len(face_locations2) > 1:
-                    print(f"WARNING: Multiple faces ({len(face_locations2)}) detected in saved image")
-                
-                face_encoding2 = face_recognition.face_encodings(image2, face_locations2)[0]
-                print(f"Saved face encoding generated successfully")
-            except Exception as e:
-                return Response(
-                    {"error": f"Error processing saved face ID image: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Compare faces
-            # Lower tolerance value makes the comparison more strict (default is 0.6)
-            tolerance = 0.4  # Making this stricter
-            results = face_recognition.compare_faces([face_encoding1], face_encoding2, tolerance=tolerance)
-            
-            # Also calculate the distance - lower means more similar
-            face_distance = face_recognition.face_distance([face_encoding1], face_encoding2)[0]
-            print(f"Face distance: {face_distance}, Tolerance: {tolerance}")
-
-            if results[0]:
-                return Response({"status": True, "message": "Face ID verified successfully!"})
-            else:
-                return Response(
-                    {"status": False, "error": f"Face ID verification failed. The faces do not match (similarity distance: {face_distance:.4f})."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        except Exception as e:
-            return Response(
-                {"error": f"An unexpected error occurred: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-
+class FaceVerifyView(ProtectedAPIView):
+    throttle_scope = 'face'
+    def post(self, request):
+        template = BiometricTemplate.objects.filter(user=request.user).first()
+        if template is None:
+            return Response({'detail': 'No face template enrolled. Use an email code.'}, status=404)
+        encoding = biometrics.extract_encoding(request.FILES.get('image'))
+        if not biometrics.matches(template.encoding, encoding):
+            return Response({'detail': 'Face verification failed. Try an email code.'}, status=400)
+        unlock(request, 'face')
+        return Response({'message': 'Vault unlocked for five minutes.'})

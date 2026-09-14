@@ -1,84 +1,67 @@
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from rest_framework import serializers
 from .models import CustomUser, Password
-
+from .fields import decrypt
+from .permissions import VaultUnlocked
 
 class UserSignupSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
-
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(write_only=True, min_length=12, max_length=128, trim_whitespace=False)
     class Meta:
         model = CustomUser
-        fields = [
-            "username",
-            "phone",
-            "email",
-            "password",
-        ]
+        fields = ['username', 'phone', 'email', 'password']
 
     def validate_email(self, value):
-        """Ensure email is always stored in lowercase."""
-        return value.strip().lower()
+        value = value.strip().lower()
+        if CustomUser.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError('Unable to register with these details.')
+        return value
 
     def validate_phone(self, value):
-        """Validate phone number format."""
-        # Remove any non-digit characters
-        cleaned_phone = ''.join(filter(str.isdigit, value))
-        
-        # Check if the phone number is between 10 and 15 digits
-        if not (10 <= len(cleaned_phone) <= 15):
-            raise serializers.ValidationError("Phone number must be between 10 and 15 digits.")
-            
-        return cleaned_phone
+        if not value.isascii() or not value.isdigit() or not 10 <= len(value) <= 15:
+            raise serializers.ValidationError('Use 10 to 15 digits.')
+        return value
+
+    def validate(self, attrs):
+        try:
+            validate_password(attrs['password'], CustomUser(username=attrs['username'], email=attrs['email']))
+        except ValidationError as exc:
+            raise serializers.ValidationError({'password': exc.messages}) from None
+        return attrs
 
     def create(self, validated_data):
-        password = validated_data.pop("password", None)
+        return CustomUser.objects.create_user(**validated_data)
 
-        if not password:
-            raise serializers.ValidationError({"password": "Password is required."})
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    password = serializers.CharField(max_length=128, trim_whitespace=False)
 
-        # Ensure email is lowercase
-        validated_data["email"] = validated_data["email"].strip().lower()
-
-        user = CustomUser(**validated_data)
-        user.set_password(password)  # Hash the password before saving
-        user.save()
-
-        return user
-
+class OTPSerializer(serializers.Serializer):
+    otp = serializers.RegexField(r'^[0-9]{6}$', max_length=6)
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = [
-            "id",
-            "username",
-            "email",
-        ]  # Include only the fields needed for user details
-
+        fields = ['id', 'username', 'email']
 
 class PasswordSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True, max_length=4096, trim_whitespace=False)
     class Meta:
         model = Password
-        fields = [
-            "domain_name",
-            "password",
-            "link",
-        ]  # Fields for storing passwords and associated info
+        fields = ['id', 'domain_name', 'password', 'link']
+        read_only_fields = ['id']
 
+    def validate_link(self, value):
+        if value and not value.startswith(('https://', 'http://')):
+            raise serializers.ValidationError('Use an HTTP or HTTPS URL.')
+        return value
 
-class ImageUploadSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = CustomUser
-        fields = [
-            "face_image",
-        ]
-
-
-from .models import Image
-
-
-class ImageSerializer(serializers.ModelSerializer):
-    # Don't include image_data in the serializer by default (it's large binary data)
-    # Include metadata instead
-    class Meta:
-        model = Image
-        fields = ["id", "filename", "content_type", "uploaded_at", "user"]
+class PasswordReadSerializer(PasswordSerializer):
+    def to_representation(self, instance):
+        request = self.context.get('request')
+        if not request or instance.user_id != request.user.pk or not VaultUnlocked().has_permission(request, None):
+            raise serializers.ValidationError('Vault is locked.')
+        data = super().to_representation(instance)
+        data['password'] = decrypt(instance.password)
+        return data
