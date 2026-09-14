@@ -2,6 +2,8 @@
 venv/
 .env
 *.env
+# Keep the safe configuration template trackable.
+!.env.example
 env/
 
 # Python
@@ -28,3 +30,6 @@ staticfiles/
 # OS
 .DS_Store
 Thumbs.db
+.env
+.env.*
+!.env.example

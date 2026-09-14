@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.sqlite3
+*.sqlite3-*
+media/
+__pycache__/
+*.py[cod]
+.next/
+node_modules/
+.venv/
+venv/
+staticfiles/
+*.tsbuildinfo
+.DS_Store

@@ -1,14 +1,23 @@
 import os
 from pathlib import Path
 
+import environ
+
 # ✅ Base Directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# ✅ Secret Key (Keep Secure - Use Environment Variable)
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")  # Update in production
+# Process environment takes precedence over the local .env file.
+env = environ.Env()
+environ.Env.read_env(BASE_DIR / ".env", overwrite=False)
+
+# Required: no hard-coded secret or fallback.
+SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 # ✅ Debug Mode - Keep False in Production!
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+DEBUG = env.bool("DEBUG", default=False)
+
+# Reserved for a later phase; no vault encryption is enabled here.
+VAULT_ENCRYPTION_KEY = env("VAULT_ENCRYPTION_KEY", default="")
 
 # ✅ Allowed Hosts
 # ✅ Allowed Hosts
@@ -168,6 +177,6 @@ EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
-EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = os.getenv("EMAIL_HOST_USER")
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
