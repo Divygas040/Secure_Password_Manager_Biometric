@@ -17,6 +17,7 @@ RUN useradd --create-home app
 WORKDIR /app
 COPY --chown=app:app password_manager/ ./
 COPY --chown=app:app start.sh /app/start.sh
+RUN install -d -o app -g app -m 0755 /app/staticfiles
 USER app
 EXPOSE 8000
 CMD ["/bin/sh", "/app/start.sh"]
