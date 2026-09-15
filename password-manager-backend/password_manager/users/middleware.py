@@ -1,10 +1,11 @@
 class PrivateResponsesMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
+
     def __call__(self, request):
         response = self.get_response(request)
-        if request.path.startswith('/api/'):
-            response['Cache-Control'] = 'no-store, private'
-            response['Pragma'] = 'no-cache'
-            response['Referrer-Policy'] = 'no-referrer'
+        if request.path.startswith("/api/"):
+            response["Cache-Control"] = "no-store, private"
+            response["Pragma"] = "no-cache"
+            response["Referrer-Policy"] = "no-referrer"
         return response

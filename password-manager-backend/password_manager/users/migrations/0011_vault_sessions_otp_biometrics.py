@@ -10,96 +10,131 @@ from django.db import migrations, models
 def protect_legacy_data(apps, schema_editor):
     from cryptography.fernet import Fernet
     from django.conf import settings
+
     alias = schema_editor.connection.alias
-    User = apps.get_model('users', 'CustomUser')
+    User = apps.get_model("users", "CustomUser")
     seen = set()
     for user in User.objects.using(alias).all().iterator():
         email = user.email.strip().lower()
         if not email or email in seen:
-            raise RuntimeError('Resolve blank or duplicate account emails offline before migration; no records were discarded.')
+            raise RuntimeError(
+                "Resolve blank or duplicate account emails offline before migration; no records were discarded."
+            )
         seen.add(email)
-        User.objects.using(alias).filter(pk=user.pk).update(email=email, otp_secret=None, otp_generated=None)
-    Password = apps.get_model('users', 'Password')
+        User.objects.using(alias).filter(pk=user.pk).update(
+            email=email, otp_secret=None, otp_generated=None
+        )
+    Password = apps.get_model("users", "Password")
     for row in Password.objects.using(alias).all().iterator():
         # Every pre-0011 value is plaintext, even if it resembles ciphertext.
         row.password = str(row.password)
-        row.save(using=alias, update_fields=['password'])
-    Image = apps.get_model('users', 'Image')
+        row.save(using=alias, update_fields=["password"])
+    Image = apps.get_model("users", "Image")
     cipher = Fernet(settings.BIOMETRIC_ENCRYPTION_KEY.encode())
     for row in Image.objects.using(alias).exclude(image_data=None).iterator():
         if row.image_data:
-            row.image_data = b'legacy-fernet:v1:' + cipher.encrypt(bytes(row.image_data))
-            row.save(using=alias, update_fields=['image_data'])
+            row.image_data = b"legacy-fernet:v1:" + cipher.encrypt(
+                bytes(row.image_data)
+            )
+            row.save(using=alias, update_fields=["image_data"])
 
 
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('auth', '0012_alter_user_first_name_max_length'),
-        ('users', '0010_convert_image_to_binary'),
+        ("auth", "0012_alter_user_first_name_max_length"),
+        ("users", "0010_convert_image_to_binary"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='BiometricTemplate',
+            name="BiometricTemplate",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('encoding', users.fields.EncryptedTextField(key_name='BIOMETRIC_ENCRYPTION_KEY')),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "encoding",
+                    users.fields.EncryptedTextField(
+                        key_name="BIOMETRIC_ENCRYPTION_KEY"
+                    ),
+                ),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
         ),
         migrations.CreateModel(
-            name='RateLimitBucket',
+            name="RateLimitBucket",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('key', models.CharField(max_length=64, unique=True)),
-                ('started_at', models.DateTimeField()),
-                ('count', models.PositiveIntegerField(default=0)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("key", models.CharField(max_length=64, unique=True)),
+                ("started_at", models.DateTimeField()),
+                ("count", models.PositiveIntegerField(default=0)),
             ],
         ),
         migrations.AddField(
-            model_name='customuser',
-            name='otp_attempts',
+            model_name="customuser",
+            name="otp_attempts",
             field=models.PositiveSmallIntegerField(default=0),
         ),
         migrations.AddField(
-            model_name='customuser',
-            name='otp_digest',
+            model_name="customuser",
+            name="otp_digest",
             field=models.CharField(blank=True, max_length=64),
         ),
         migrations.AddField(
-            model_name='customuser',
-            name='otp_expires_at',
+            model_name="customuser",
+            name="otp_expires_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='customuser',
-            name='otp_sent_at',
+            model_name="customuser",
+            name="otp_sent_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='customuser',
-            name='otp_session',
+            model_name="customuser",
+            name="otp_session",
             field=models.CharField(blank=True, max_length=64),
         ),
         migrations.AlterField(
-            model_name='password',
-            name='link',
+            model_name="password",
+            name="link",
             field=models.URLField(blank=True),
         ),
         migrations.AlterField(
-            model_name='password',
-            name='password',
+            model_name="password",
+            name="password",
             field=users.fields.EncryptedTextField(),
         ),
         migrations.RunPython(protect_legacy_data),
         migrations.AddConstraint(
-            model_name='customuser',
-            constraint=models.UniqueConstraint(django.db.models.functions.text.Lower('email'), name='unique_user_email_ci'),
+            model_name="customuser",
+            constraint=models.UniqueConstraint(
+                django.db.models.functions.text.Lower("email"),
+                name="unique_user_email_ci",
+            ),
         ),
         migrations.AddField(
-            model_name='biometrictemplate',
-            name='user',
-            field=models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='biometric_template', to=settings.AUTH_USER_MODEL),
+            model_name="biometrictemplate",
+            name="user",
+            field=models.OneToOneField(
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="biometric_template",
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
     ]
