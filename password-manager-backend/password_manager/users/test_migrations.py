@@ -103,7 +103,7 @@ assert Fernet(settings.BIOMETRIC_ENCRYPTION_KEY.encode()).decrypt(raw[len(b'lega
 from concurrent.futures import ThreadPoolExecutor
 import re
 from django.core import mail
-from django.db import close_old_connections
+from django.db import close_old_connections, connections
 from django.test import TransactionTestCase, override_settings, skipUnlessDBFeature
 from rest_framework.test import APIClient
 from users.models import CustomUser
@@ -113,6 +113,7 @@ from users.models import CustomUser
 class PostgreSQLConcurrencyTests(TransactionTestCase):
     @skipUnlessDBFeature("has_select_for_update")
     def test_otp_can_only_be_consumed_once_under_concurrency(self):
+        self.addCleanup(connections.close_all)
         CustomUser.objects.create_user(
             "concurrent",
             email="concurrent@example.invalid",
@@ -141,7 +142,8 @@ class PostgreSQLConcurrencyTests(TransactionTestCase):
                 c.cookies[settings.SESSION_COOKIE_NAME] = cookie
                 return c.post("/api/users/verify-otp/", {"otp": code}).status_code
             finally:
-                close_old_connections()
+                # Healthy persistent connections must also close in their owning thread.
+                connections.close_all()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             self.assertEqual(sorted(pool.map(attempt, range(2))), [200, 400])
