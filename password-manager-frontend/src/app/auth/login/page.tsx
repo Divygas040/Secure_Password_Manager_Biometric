@@ -2,10 +2,11 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
-  const { setIsAuthenticated } = useAuth();
+  const { refreshUser } = useAuth();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
@@ -30,7 +31,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/users/login/", {
+      const response = await apiFetch("/api/users/login/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -39,18 +40,18 @@ export default function LoginPage() {
       const data = await response.json();
 
       if (response.ok) {
-        // Store JWT tokens
-        localStorage.setItem("access_token", data.token);
-        localStorage.setItem("refresh_token", data.refresh);
+        // Refresh the user profile from the authenticated session.
 
-        setIsAuthenticated(true);
+
+
+        await refreshUser();
         toast.success("Logged in successfully!");
-        router.push("../dashboard");
+        router.push("/dashboard");
       } else {
-        toast.error(data.error || "Invalid credentials");
+        toast.error(data.detail || "Invalid credentials");
       }
-    } catch (error) {
-      console.error("⚠️ API Error:", error);
+    } catch {
+
       toast.error("⚠️ Error connecting to the server.");
     }
 
@@ -163,7 +164,7 @@ export default function LoginPage() {
             className="text-sm text-gray-400 cursor-pointer hover:text-blue-500 transition duration-300"
             onClick={() => router.push("/auth/signup")}
           >
-            Don't have an account? <span className="font-medium">Sign up</span>
+            Don&apos;t have an account? <span className="font-medium">Sign up</span>
           </p>
         </div>
       </div>

@@ -1,29 +1,48 @@
-databases:
-  - name: password_manager_db
-    databaseName: password_manager
-    user: password_manager_user
-    plan: free
-    region: singapore
-
+# Preparation only. Review service limits manually before creating any resource.
+# DATABASE_URL must reference an existing private PostgreSQL service.
+# No database or paid plan is created by this blueprint.
 services:
   - type: web
     name: password-manager-backend
+    runtime: docker
     rootDir: password-manager-backend
-    runtime: python
-    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: free
-    buildCommand: "./build.sh"
-    startCommand: "cd password_manager && gunicorn password_manager.wsgi:application"
+    healthCheckPath: /health/
+    autoDeployTrigger: "off"
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.9.0
-      - key: DATABASE_URL
-        fromDatabase:
-          name: password_manager_db
-          property: connectionString
-      - key: DJANGO_SECRET_KEY
-        generateValue: true
       - key: DEBUG
         value: "False"
+      - key: TRUST_PROXY_HTTPS
+        value: "True"
+      - key: COOKIE_SAMESITE
+        value: "None"
+      - key: SECURE_HSTS_SECONDS
+        value: "0"
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: VAULT_ENCRYPTION_KEY
+        sync: false
+      - key: BIOMETRIC_ENCRYPTION_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
       - key: ALLOWED_HOSTS
-        value: "*"
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: EMAIL_BACKEND
+        sync: false
+      - key: EMAIL_HOST
+        sync: false
+      - key: EMAIL_PORT
+        sync: false
+      - key: EMAIL_HOST_USER
+        sync: false
+      - key: EMAIL_HOST_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false

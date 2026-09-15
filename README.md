@@ -1,153 +1,138 @@
-# 🔐 Secure Password Manager with Biometric Authentication
+# BioPass: password manager demo
 
-A secure, modern password manager application featuring biometric authentication for enhanced security. This full-stack application provides a user-friendly interface for managing passwords while ensuring your sensitive data is protected with industry-standard encryption and biometric verification.
+BioPass is a Next.js frontend and Django REST API with server-side authenticated
+encryption at rest, email verification, and optional camera-based face verification.
+It is an educational public-demo candidate, not a replacement for an independently
+audited password manager. Use synthetic credentials in the demo.
 
-## ✨ Features
+## Architecture
 
-- 🔒 **Secure Password Storage** - Encrypted password storage with industry-standard encryption
-- 👆 **Biometric Authentication** - Fingerprint and face recognition support for secure access
-- 🎨 **Modern UI** - Clean and intuitive user interface built with React
-- 🔑 **Password Generation** - Generate strong, random passwords
-- 📱 **Cross-Platform** - Works on multiple platforms and devices
-- 🔐 **Master Password Protection** - Additional layer of security with master password
-- 📊 **Password Strength Analysis** - Real-time password strength indicators
-- 🔍 **Search & Filter** - Easily find and manage your stored passwords
-
-## 🛠️ Tech Stack
-
-### Frontend
-- **TypeScript** - Type-safe JavaScript
-- **React** - Modern UI framework
-- **CSS** - Styling and responsive design
-
-### Backend
-- **Python** - Backend API and server logic
-- RESTful API architecture
-
-## 📁 Project Structure
-
-```
-Secure_Password_Manager_Biometric/
-├── password-manager-frontend/    # Frontend React application
-│   ├── src/                      # Source files
-│   ├── public/                   # Public assets
-│   └── package.json              # Frontend dependencies
-│
-├── password-manager-backend/     # Backend Python API
-│   ├── app/                      # Application code
-│   ├── requirements.txt          # Python dependencies
-│   └── main.py                   # Entry point
-│
-└── README.md                     # This file
+```text
+Browser
+  | HTTPS, HttpOnly API session cookie + CSRF header
+  v
+Vercel / Next.js frontend
+  | HTTPS (browser calls the configured API origin)
+  v
+Render / Django REST API + Gunicorn
+  | private DATABASE_URL
+  v
+PostgreSQL (no public custom domain)
 ```
 
-## 🚀 Getting Started
+The frontend renders the interface; Django owns authorization. Each vault query
+filters by the authenticated user and requires an unexpired server-side vault
+verification grant. A changed React flag cannot unlock protected data.
 
-### Prerequisites
+## Security model
 
-- **Node.js** (v14 or higher) and npm
-- **Python** (v3.8 or higher)
-- **pip** (Python package manager)
+- Login passwords are hashed with Django's Argon2 password hasher.
+- Vault credentials use versioned Fernet authenticated encryption. Decryption
+  happens explicitly during an authorized read. Server operators with the keys
+  can decrypt the data. This is **not zero-knowledge or end-to-end encryption**.
+- Native Django database sessions replace JWT access/refresh tokens. Authentication
+  cookies are HttpOnly, Secure in production, and host-only. Sessions have a
+  30-minute idle timeout and a 12-hour absolute API lifetime. Activity renews the
+  session; there is no JWT refresh endpoint or raw JWT in the browser.
+- Login, signup, logout and all authenticated mutations enforce CSRF. The client
+  obtains a masked CSRF token from the API and sends it in a header, with credentials.
+- A valid email code or enrolled face grants five minutes of vault access. Face
+  enrollment/replacement itself requires a recent **email** verification.
+- Email codes use cryptographic randomness, a keyed digest, a five-minute expiry,
+  one-time consumption, a 60-second resend cooldown, and five attempts per challenge.
+  Challenges are bound to the login session. Shared database throttles limit login,
+  signup, email and face endpoints by source and account.
+- Camera captures are validated, processed in memory, and discarded. New enrollments
+  retain only an encrypted 128-dimensional template under a separate key.
+  Face verification has **no liveness or anti-spoofing detection**. It is not Apple
+  Face ID, Windows Hello or WebAuthn. Photos/replays may fool it. Email fallback remains
+  available. Do not treat this demo factor as hardware biometric security.
+- Responses containing account/vault data use `Cache-Control: no-store`. The client
+  clears displayed credentials on tab hiding, session failure and a five-minute
+  timer. Clipboard contents cannot be reliably cleared by browser timers; users
+  must clear copied credentials themselves.
 
-### Installation
+## Start locally
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Divy-Goswami/Secure_Password_Manager_Biometric.git
-   cd Secure_Password_Manager_Biometric
-   ```
+Use Python 3.12.14 and Node 24 (Node 22.18+ is also supported).
 
-2. **Set up the Backend**
-   ```bash
-   cd password-manager-backend
-   pip install -r requirements.txt
-   ```
+```sh
+git clone https://github.com/Divygas040/Secure_Password_Manager_Biometric.git
+cd Secure_Password_Manager_Biometric
+git switch production-hardening
+cd password-manager-backend/password_manager
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+```
 
-3. **Set up the Frontend**
-   ```bash
-   cd ../password-manager-frontend
-   npm install
-   ```
+Replace every placeholder in the ignored backend `.env` before starting:
 
-### Running the Application
+- Create your own strong Django secret and two different Fernet keys using a
+  trusted local secrets tool. Keep encrypted offline backups of the encryption
+  keys. Do not paste secrets into logs, issues, commits, screenshots or documentation.
+- Set `DEBUG=True`, `ALLOWED_HOSTS=localhost,127.0.0.1`.
+- Set both origin lists to `http://127.0.0.1:3000` for the commands below.
+- Leave `DATABASE_URL` empty to use local SQLite, or supply a local PostgreSQL URL.
+- Set `COOKIE_SAMESITE=Lax`, `TRUST_PROXY_HTTPS=False`, `TRUSTED_PROXY_COUNT=0`,
+  `SECURE_HSTS_SECONDS=0`.
+- Configure an email backend and your own credentials if using email verification.
+  SMTP is the default. Local automated tests use in-memory mail; they do not send
+  real emails or expose verification codes. Do not use console/file mail in production.
+- The template lists optional email fields too: use your provider's actual port,
+  TLS/SSL requirements and verified sender. Do not leave placeholder strings in place.
 
-1. **Start the Backend Server**
-   ```bash
-   cd password-manager-backend
-   python main.py
-   # or
-   python -m uvicorn main:app --reload
-   ```
-   The backend API will be available at `http://localhost:8000` (or the configured port).
+```sh
+python manage.py migrate
+python manage.py check_data_ready
+python manage.py collectstatic --noinput
+python manage.py check
+python manage.py runserver 127.0.0.1:8000
+```
 
-2. **Start the Frontend Development Server**
-   ```bash
-   cd password-manager-frontend
-   npm start
-   ```
-   The frontend will be available at `http://localhost:3000` (or the configured port).
+In another terminal:
 
-## 🔐 Security Features
+```sh
+cd password-manager-frontend
+npm ci
+cp .env.example .env.local
+npm run dev
+```
 
-- **End-to-End Encryption** - All passwords are encrypted before storage
-- **Biometric Authentication** - Secure access using fingerprint or face recognition
-- **Master Password** - Additional security layer
-- **Secure Key Management** - Proper handling of encryption keys
-- **No Plain Text Storage** - Passwords are never stored in plain text
+Open `http://127.0.0.1:3000`. Use the same hostname spelling for frontend and API;
+`localhost` and `127.0.0.1` are different sites for cookies. Sign up, log in, unlock
+via an email code, then add or retrieve credentials. The dashboard offers optional
+face enrollment after email verification. Later vault unlocks can use either factor.
 
-## 📝 Usage
+## Validation and deployment
 
-1. **First Time Setup**
-   - Register a new account
-   - Set up your master password
-   - Enable biometric authentication (if supported on your device)
+```sh
+# In the backend project directory, with environment configured:
+python manage.py check
+python manage.py check --deploy
+python manage.py makemigrations --check
+python manage.py test
+python -m pip check
 
-2. **Adding Passwords**
-   - Click "Add New Password"
-   - Enter the website/service name
-   - Enter your username/email
-   - Enter or generate a password
-   - Save securely
+# In password-manager-frontend:
+npm ci
+npm test
+npm run lint
+npm run build
+npm audit
+```
 
-3. **Accessing Passwords**
-   - Authenticate using biometrics or master password
-   - Search for the desired password
-   - Copy to clipboard with one click
+Deployment checks should use `DEBUG=False` and the intended production environment.
+HSTS subdomain/preload warnings are intentional until domain ownership and HTTPS
+coverage are confirmed; do not blindly enable preload to silence them.
 
-4. **Generating Strong Passwords**
-   - Use the built-in password generator
-   - Customize length and character types
-   - Copy generated password directly
+- [Deployment instructions](docs/DEPLOYMENT.md)
+- [Required configuration](docs/ENVIRONMENT.md)
+- [Legacy data and key operations](docs/DATA_MIGRATION.md)
+- [Deployment checklist](DEPLOYMENT_CHECKLIST.md)
+- [Baseline audit](docs/BASELINE_AUDIT.md)
+- [Validation results and remaining gaps](docs/VALIDATION.md)
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is open source and available under the [MIT License](LICENSE).
-
-## 👤 Author
-
-**Divy Goswami**
-- GitHub: [@Divy-Goswami](https://github.com/Divy-Goswami)
-
-## 🙏 Acknowledgments
-
-- Thanks to all contributors who have helped improve this project
-- Built with security and user privacy as top priorities
-
-## ⚠️ Disclaimer
-
-This password manager is provided as-is for educational and personal use. Always ensure you follow best security practices and keep your master password secure. The developers are not responsible for any data loss or security breaches.
-
----
-
-⭐ If you find this project helpful, please consider giving it a star!
-
+No deployment, purchase, subscription or billing action is performed by these
+instructions. Review any provider plan/pricing prompt manually before continuing.

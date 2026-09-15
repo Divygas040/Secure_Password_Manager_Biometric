@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import toast from "react-hot-toast";
-import Link from "next/link";
+import { api, ApiError } from "@/lib/api";
 import { 
   generateStrongPassword, 
   evaluatePasswordStrength, 
@@ -44,41 +44,16 @@ const AddPasswordForm = () => {
     e.preventDefault();
     setLoading(true);
 
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      toast.error("You must be logged in to add a password.");
-      setLoading(false);
-      return;
-    }
+    try {
+      await api('/api/users/passwords/', { method: 'POST', body: JSON.stringify({ domain_name: domainName, password, link }) });
+      setPassword(''); setDomainName(''); setLink('');
+      toast.success('Password saved.'); router.push('/dashboard');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) router.push('/auth/login');
+      else if (error instanceof ApiError && error.status === 403) { toast.error('Unlock your vault before adding a password.'); router.push('/password/show'); }
+      else toast.error('Unable to save password. Please retry.');
+    } finally { setLoading(false); }
 
-    const response = await fetch(
-      "http://127.0.0.1:8000/api/users/add_password/",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          domain_name: domainName,
-          password: password,
-          link: link,
-        }),
-      }
-    );
-
-    setLoading(false);
-
-    if (response.ok) {
-      toast.success("Password added successfully!");
-      router.push("/dashboard");
-      setDomainName("");
-      setPassword("");
-      setLink("");
-    } else {
-      const errorText = await response.text();
-      toast.error(`Failed to add password: ${errorText}`);
-    }
   };
 
   return (

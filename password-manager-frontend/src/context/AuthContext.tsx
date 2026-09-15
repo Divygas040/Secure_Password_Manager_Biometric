@@ -1,43 +1,31 @@
 "use client";
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
+import { api } from '@/lib/api';
 
-import { createContext, useContext, useState, ReactNode } from "react";
-
-interface AuthContextType {
-  isFaceVerified: boolean;
-  setIsFaceVerified: (verified: boolean) => void;
-  isOTPVerified: boolean;
-  setIsOTPVerified: (verified: boolean) => void;
-  isAuthenticated: boolean;
-  setIsAuthenticated: (authenticated: boolean) => void; // Add this line
+export interface User { id: number; username: string; email: string; face_enrolled: boolean; vault_unlocked: boolean; }
+interface AuthState { user: User | null; loading: boolean; refreshUser: () => Promise<void>; logout: () => Promise<void>; }
+const AuthContext = createContext<AuthState | undefined>(undefined);
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const refreshUser = useCallback(async () => {
+    try { setUser(await api<User>('/api/users/me/')); }
+    catch { setUser(null); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => {
+    // Remove obsolete credentials from installations of the previous client.
+    try { localStorage.removeItem('access_token'); localStorage.removeItem('refresh_token'); } catch { /* Storage may be disabled. */ }
+    void refreshUser();
+  }, [refreshUser]);
+  const logout = useCallback(async () => {
+    await api('/api/users/logout/', { method: 'POST' });
+    setUser(null);
+  }, []);
+  return <AuthContext.Provider value={{ user, loading, refreshUser, logout }}>{children}</AuthContext.Provider>;
 }
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [isFaceVerified, setIsFaceVerified] = useState(false);
-  const [isOTPVerified, setIsOTPVerified] = useState(false);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-
-  return (
-    <AuthContext.Provider
-      value={{
-        isFaceVerified,
-        setIsFaceVerified,
-        isOTPVerified,
-        setIsOTPVerified,
-        isAuthenticated,
-        setIsAuthenticated, // Add this line
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
-};
-
-export const useAuth = () => {
+export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error("useAuth must be used within an AuthProvider");
-  }
+  if (!context) throw new Error('AuthProvider required.');
   return context;
-};
+}
