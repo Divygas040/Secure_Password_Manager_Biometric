@@ -1,5 +1,7 @@
 FROM python:3.12.14-slim-bookworm AS builder
 ENV PIP_NO_CACHE_DIR=1
+# Compile dlib serially to limit peak build memory; scoped to this builder stage.
+ENV CMAKE_BUILD_PARALLEL_LEVEL=1 MAKEFLAGS=-j1
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential cmake && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY password_manager/requirements.production.lock ./requirements.production.lock
