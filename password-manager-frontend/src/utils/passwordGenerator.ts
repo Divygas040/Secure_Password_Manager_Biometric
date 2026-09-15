@@ -43,36 +43,22 @@ export const generateStrongPassword = (options: PasswordOptions = {}): string =>
     charPool = lowercaseChars + numberChars;
   }
 
-  // Generate password
-  let password = '';
-  let hasRequiredChars = false;
-
-  // Keep generating until we have at least one character from each required set
-  while (!hasRequiredChars) {
-    password = '';
-    for (let i = 0; i < length; i++) {
-      const randomIndex = Math.floor(Math.random() * charPool.length);
-      password += charPool[randomIndex];
-    }
-
-    // Verify password contains at least one character from each required set
-    hasRequiredChars = true;
-    
-    if (includeUppercase && !new RegExp(`[${uppercaseChars}]`).test(password)) {
-      hasRequiredChars = false;
-    }
-    if (includeLowercase && !new RegExp(`[${lowercaseChars}]`).test(password)) {
-      hasRequiredChars = false;
-    }
-    if (includeNumbers && !new RegExp(`[${numberChars}]`).test(password)) {
-      hasRequiredChars = false;
-    }
-    if (includeSymbols && !new RegExp(`[${symbolChars}]`).test(password)) {
-      hasRequiredChars = false;
-    }
+  if (!Number.isInteger(length) || length < 8 || length > 128) throw new Error('Password length must be 8–128.');
+  const randomIndex = (max: number) => {
+    const buffer = new Uint32Array(1);
+    const ceiling = Math.floor(0x100000000 / max) * max;
+    do { crypto.getRandomValues(buffer); } while (buffer[0] >= ceiling);
+    return buffer[0] % max;
+  };
+  const groups = [includeUppercase && uppercaseChars, includeLowercase && lowercaseChars,
+    includeNumbers && numberChars, includeSymbols && symbolChars].filter((group): group is string => Boolean(group));
+  const characters = groups.map(group => group[randomIndex(group.length)]);
+  while (characters.length < length) characters.push(charPool[randomIndex(charPool.length)]);
+  for (let i = characters.length - 1; i > 0; i--) {
+    const j = randomIndex(i + 1);
+    [characters[i], characters[j]] = [characters[j], characters[i]];
   }
-
-  return password;
+  return characters.join('');
 };
 
 /**

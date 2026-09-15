@@ -34,16 +34,16 @@ export default function HomePage() {
           BioPass
         </h1>
         <p className="text-gray-400 max-w-md mx-auto">
-          Welcome,Your Face is Your Identity
+          Your vault, with email or demo face verification
         </p>
       </div>
 
       {/* Features */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full mb-12">
         {[
-          { title: "Face Recognition", icon: "👤", desc: "Unlock with your face" },
+          { title: "Face Verification", icon: "👤", desc: "Camera-based demo verification" },
           { title: "OTP Authentication", icon: "🔢", desc: "Extra layer of security" },
-          { title: "Secure Storage", icon: "🔒", desc: "Military-grade encryption" }
+          { title: "Secure Storage", icon: "🔒", desc: "Server-side encryption at rest" }
         ].map((feature, index) => (
           <div 
             key={index} 
@@ -82,7 +82,7 @@ export default function HomePage() {
       {/* Footer */}
       <div className="mt-16 text-center text-gray-500 text-sm">
         <p>&copy; {new Date().getFullYear()} BioPass. All rights reserved.</p>
-        <p className="mt-1">Advanced security for modern digital life.</p>
+        <p className="mt-1">Educational demo; face verification has no liveness detection.</p>
       </div>
     </div>
   );

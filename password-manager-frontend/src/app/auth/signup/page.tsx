@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import { apiFetch } from "@/lib/api";
 import { 
   generateStrongPassword, 
   evaluatePasswordStrength, 
@@ -54,8 +55,8 @@ export default function SignupPage() {
       toast.error("Please enter a valid email address");
       return false;
     }
-    if (!password || password.length < 8) {
-      toast.error("Password must be at least 8 characters");
+    if (!password || password.length < 12) {
+      toast.error("Password must be at least 12 characters");
       return false;
     }
     return true;
@@ -78,33 +79,33 @@ export default function SignupPage() {
     };
 
     // Log the request data for debugging
-    console.log("Sending signup request with data:", requestData);
+
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/users/signup/", {
+      const response = await apiFetch("/api/users/signup/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestData),
       });
 
       // Log the response status
-      console.log("Signup response status:", response.status);
+
 
       const data = await response.json();
       
       // Log the response data
-      console.log("Signup response data:", data);
+
 
       if (response.ok) {
         toast.success("Account created successfully!");
-        setTimeout(() => router.push("../auth/login"), 1500);
+        setTimeout(() => router.push("/auth/login"), 1500);
       } else {
         // Display more detailed error message
         const errorMessage = data.error || Object.values(data).flat().join(', ') || "Signup failed. Please try again.";
         toast.error(errorMessage);
       }
-    } catch (error) {
-      console.error("⚠️ API Error:", error);
+    } catch {
+
       toast.error("Error connecting to the server");
     } finally {
       setLoading(false);
@@ -352,7 +353,7 @@ export default function SignupPage() {
               </div>
             )}
 
-            <p className="mt-1 text-xs text-gray-500">Must be at least 8 characters</p>
+            <p className="mt-1 text-xs text-gray-500">Must be at least 12 characters</p>
           </div>
 
           {/* Terms & Conditions */}
@@ -364,7 +365,7 @@ export default function SignupPage() {
               required
             />
             <label htmlFor="terms" className="ml-2 block text-sm text-gray-400">
-              I agree to the <span className="text-blue-500 cursor-pointer hover:underline">Terms of Service</span> and <span className="text-blue-500 cursor-pointer hover:underline">Privacy Policy</span>
+              I understand this is an educational demo and face verification has no liveness detection.
             </label>
           </div>
 
