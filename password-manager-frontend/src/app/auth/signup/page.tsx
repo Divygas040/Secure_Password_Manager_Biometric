@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { apiFetch } from "@/lib/api";
+import FieldFeedback from "@/components/FieldFeedback";
+import { validateSignup, normalizeEmail, USERNAME_HELP, USERNAME_PATTERN } from "@/lib/validation";
+import type { FieldErrors } from "@/lib/validation";
+import { api, formError } from "@/lib/api";
 import { 
   generateStrongPassword, 
   evaluatePasswordStrength, 
@@ -17,10 +20,13 @@ export default function SignupPage() {
 
   // Form states
   const [name, setName] = useState("");
+  const [terms, setTerms] = useState(false);
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [passwordOptions, setPasswordOptions] = useState({
@@ -41,75 +47,22 @@ export default function SignupPage() {
     setPasswordStrength(evaluatePasswordStrength(password));
   }, [password]);
 
-  // Form validation
-  const validateForm = () => {
-    if (!name || name.length < 3) {
-      toast.error("Name must be at least 3 characters");
-      return false;
-    }
-    if (!phone || !/^\d{10,12}$/.test(phone)) {
-      toast.error("Please enter a valid phone number");
-      return false;
-    }
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      toast.error("Please enter a valid email address");
-      return false;
-    }
-    if (!password || password.length < 12) {
-      toast.error("Password must be at least 12 characters");
-      return false;
-    }
-    return true;
-  };
-
-  // Handle Signup API Call
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    
-    if (!validateForm()) return;
-    
-    setLoading(true);
-
-    // Prepare the request data
-    const requestData = {
-      username: name.trim(),
-      phone: phone.trim(),
-      email: email.trim().toLowerCase(),
-      password: password,
-    };
-
-    // Log the request data for debugging
-
-
+    if (submitting.current) return;
+    const requestData = { username: name.trim(), phone, email: normalizeEmail(email), password };
+    const nextErrors = validateSignup({ ...requestData, terms });
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+    submitting.current = true; setLoading(true);
     try {
-      const response = await apiFetch("/api/users/signup/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestData),
-      });
-
-      // Log the response status
-
-
-      const data = await response.json();
-      
-      // Log the response data
-
-
-      if (response.ok) {
-        toast.success("Account created successfully!");
-        setTimeout(() => router.push("/auth/login"), 1500);
-      } else {
-        // Display more detailed error message
-        const errorMessage = data.error || Object.values(data).flat().join(', ') || "Signup failed. Please try again.";
-        toast.error(errorMessage);
-      }
-    } catch {
-
-      toast.error("Error connecting to the server");
-    } finally {
-      setLoading(false);
-    }
+      await api('/api/users/signup/', { method: 'POST', body: JSON.stringify(requestData) });
+      toast.success('Account created successfully!');
+      router.push('/auth/login');
+    } catch (error) {
+      const result = formError(error, ['username', 'phone', 'email', 'password']);
+      setErrors(result.fields); if (result.message) toast.error(result.message);
+    } finally { submitting.current = false; setLoading(false); }
   };
 
   // Function to generate password
@@ -142,10 +95,10 @@ export default function SignupPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSignup} className={`space-y-5 ${mounted ? 'animate-slideUp' : ''}`}>
+        <form noValidate onSubmit={handleSignup} className={`space-y-5 ${mounted ? 'animate-slideUp' : ''}`}>
         {/* Name Input */}
           <div>
-            <label htmlFor="name" className="block text-sm font-medium text-gray-400 mb-1">Full Name</label>
+            <label htmlFor="username" className="block text-sm font-medium text-gray-400 mb-1">Username</label>
             <div className="relative">
               <div className="icon-container-left">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -153,15 +106,18 @@ export default function SignupPage() {
                 </svg>
               </div>
         <input
-                id="name"
+                id="username"
+                autoComplete="username" minLength={3} maxLength={30} pattern={USERNAME_PATTERN} autoCapitalize="none" spellCheck={false}
+                aria-invalid={Boolean(errors.username)} aria-describedby="username-feedback"
           type="text"
-                placeholder="John Doe"
+                placeholder="TestUser"
           value={name}
           onChange={(e) => setName(e.target.value)}
                 className="input-modern input-icon-left"
           required
         />
             </div>
+              <FieldFeedback id="username-feedback" error={errors.username} help={USERNAME_HELP} />
           </div>
 
         {/* Phone Input */}
@@ -175,14 +131,17 @@ export default function SignupPage() {
               </div>
         <input
                 id="phone"
+                autoComplete="tel" inputMode="numeric" minLength={10} maxLength={15} pattern="[0-9]{10,15}"
+                aria-invalid={Boolean(errors.phone)} aria-describedby="phone-feedback"
           type="tel"
                 placeholder="1234567890"
           value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, ''))}
+                onChange={(e) => setPhone(e.target.value)}
                 className="input-modern input-icon-left"
           required
         />
             </div>
+              <FieldFeedback id="phone-feedback" error={errors.phone} help="10–15 digits" />
           </div>
 
         {/* Email Input */}
@@ -196,6 +155,8 @@ export default function SignupPage() {
               </div>
         <input
                 id="email"
+                autoComplete="email" inputMode="email" maxLength={254} autoCapitalize="none" spellCheck={false}
+                aria-invalid={Boolean(errors.email)} aria-describedby="email-feedback"
           type="email"
                 placeholder="you@example.com"
           value={email}
@@ -204,6 +165,7 @@ export default function SignupPage() {
           required
         />
             </div>
+              <FieldFeedback id="email-feedback" error={errors.email} help="Enter your email address." />
           </div>
 
         {/* Password Input */}
@@ -217,6 +179,8 @@ export default function SignupPage() {
               </div>
         <input
                 id="password"
+                autoComplete="new-password" maxLength={128} minLength={12}
+                aria-invalid={Boolean(errors.password)} aria-describedby="password-feedback"
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
           value={password}
@@ -242,6 +206,7 @@ export default function SignupPage() {
                 {/* Show/hide password button */}
                 <button
                   type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword(!showPassword)}
                   className="px-1 focus:outline-none"
                 >
@@ -300,7 +265,8 @@ export default function SignupPage() {
                     </label>
                     <input
                       type="range"
-                      min="8"
+                      aria-label="Generated password length"
+                      min="12"
                       max="32"
                       value={passwordOptions.length}
                       onChange={(e) => setPasswordOptions({...passwordOptions, length: parseInt(e.target.value)})}
@@ -353,13 +319,15 @@ export default function SignupPage() {
               </div>
             )}
 
-            <p className="mt-1 text-xs text-gray-500">Must be at least 12 characters</p>
+            <FieldFeedback id="password-feedback" error={errors.password} help="12–128 characters. Avoid common passwords and personal information." />
           </div>
 
           {/* Terms & Conditions */}
           <div className="flex items-center">
             <input
               id="terms"
+              checked={terms} onChange={e => setTerms(e.target.checked)}
+              aria-invalid={Boolean(errors.terms)} aria-describedby="terms-feedback"
               type="checkbox"
               className="h-4 w-4 rounded border-gray-700 text-blue-600 focus:ring-blue-500 bg-gray-800"
               required
@@ -368,6 +336,8 @@ export default function SignupPage() {
               I understand this is an educational demo and face verification has no liveness detection.
             </label>
           </div>
+
+          <FieldFeedback id="terms-feedback" error={errors.terms} />
 
           {/* Submit Button */}
         <button

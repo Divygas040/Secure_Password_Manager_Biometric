@@ -1,8 +1,11 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { apiFetch } from "@/lib/api";
+import FieldFeedback from "@/components/FieldFeedback";
+import { validateLogin, normalizeEmail } from "@/lib/validation";
+import type { FieldErrors } from "@/lib/validation";
+import { api, formError } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
 export default function LoginPage() {
@@ -14,48 +17,30 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // Handle Login
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!email || !password) {
-      toast.error("Email and Password are required!");
-      return;
-    }
-
-    setLoading(true);
-
+    if (submitting.current) return;
+    const values = { email: normalizeEmail(email), password };
+    const nextErrors = validateLogin(values);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+    submitting.current = true; setLoading(true);
     try {
-      const response = await apiFetch("/api/users/login/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Refresh the user profile from the authenticated session.
-
-
-
-        await refreshUser();
-        toast.success("Logged in successfully!");
-        router.push("/dashboard");
-      } else {
-        toast.error(data.detail || "Invalid credentials");
-      }
-    } catch {
-
-      toast.error("⚠️ Error connecting to the server.");
-    }
-
-    setLoading(false);
+      await api('/api/users/login/', { method: 'POST', body: JSON.stringify(values) });
+      await refreshUser();
+      toast.success('Logged in successfully!'); router.push('/dashboard');
+    } catch (error) {
+      const result = formError(error, ['email', 'password']);
+      setErrors(result.fields); if (result.message) toast.error(result.message);
+    } finally { submitting.current = false; setLoading(false); }
   };
 
   return (
@@ -80,7 +65,7 @@ export default function LoginPage() {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleLogin} className={`space-y-6 ${mounted ? 'animate-slideUp' : ''}`}>
+        <form noValidate onSubmit={handleLogin} className={`space-y-6 ${mounted ? 'animate-slideUp' : ''}`}>
           {/* Email Input */}
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-gray-400 mb-1">Email Address</label>
@@ -92,6 +77,8 @@ export default function LoginPage() {
               </div>
               <input
                 id="email"
+                autoComplete="email" inputMode="email" maxLength={254} autoCapitalize="none" spellCheck={false}
+                aria-invalid={Boolean(errors.email)} aria-describedby="email-feedback"
                 type="email"
                 placeholder="you@example.com"
                 value={email}
@@ -100,6 +87,7 @@ export default function LoginPage() {
                 required
               />
             </div>
+              <FieldFeedback id="email-feedback" error={errors.email} help="Enter your email address." />
           </div>
 
           {/* Password Input */}
@@ -113,6 +101,8 @@ export default function LoginPage() {
               </div>
               <input
                 id="password"
+                autoComplete="current-password" maxLength={128}
+                aria-invalid={Boolean(errors.password)} aria-describedby="password-feedback"
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
                 value={password}
@@ -120,9 +110,10 @@ export default function LoginPage() {
                 className="input-modern input-icon-left input-icon-right"
                 required
               />
-              <div 
+              <button type="button"
                 className="icon-container-right"
-                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword(!showPassword)}
               >
                 {showPassword ? (
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500 hover:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -134,11 +125,13 @@ export default function LoginPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
                 )}
-              </div>
+              </button>
             </div>
           </div>
 
-          {/* Submit Button */}
+          <FieldFeedback id="password-feedback" error={errors.password} />
+
+                {/* Submit Button */}
           <button
             type="submit"
             className="btn-modern btn-primary w-full flex items-center justify-center"

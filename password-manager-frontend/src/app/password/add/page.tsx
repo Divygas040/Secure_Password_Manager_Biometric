@@ -1,9 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import toast from "react-hot-toast";
-import { api, ApiError } from "@/lib/api";
+import FieldFeedback from "@/components/FieldFeedback";
+import { validateVault } from "@/lib/validation";
+import type { FieldErrors } from "@/lib/validation";
+import { api, ApiError, formError } from "@/lib/api";
 import { 
   generateStrongPassword, 
   evaluatePasswordStrength, 
@@ -18,6 +21,8 @@ const AddPasswordForm = () => {
   const [password, setPassword] = useState("");
   const [link, setLink] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const [errors, setErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [passwordOptions, setPasswordOptions] = useState({
@@ -42,18 +47,24 @@ const AddPasswordForm = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-
+    if (submitting.current) return;
+    const values = { domain_name: domainName.trim(), password, link: link.trim() };
+    const nextErrors = validateVault(values);
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) return;
+    submitting.current = true; setLoading(true);
     try {
-      await api('/api/users/passwords/', { method: 'POST', body: JSON.stringify({ domain_name: domainName, password, link }) });
+      await api('/api/users/passwords/', { method: 'POST', body: JSON.stringify(values) });
       setPassword(''); setDomainName(''); setLink('');
       toast.success('Password saved.'); router.push('/dashboard');
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) router.push('/auth/login');
       else if (error instanceof ApiError && error.status === 403) { toast.error('Unlock your vault before adding a password.'); router.push('/password/show'); }
-      else toast.error('Unable to save password. Please retry.');
-    } finally { setLoading(false); }
-
+      else {
+        const result = formError(error, ['domain_name', 'password', 'link']);
+        setErrors(result.fields); if (result.message) toast.error(result.message);
+      }
+    } finally { submitting.current = false; setLoading(false); }
   };
 
   return (
@@ -91,7 +102,7 @@ const AddPasswordForm = () => {
               <p className="text-gray-400 mt-2">Securely store your new credentials</p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form noValidate onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label htmlFor="domain_name" className="block text-sm font-medium text-gray-300 mb-1">
                   Domain Name
@@ -105,6 +116,8 @@ const AddPasswordForm = () => {
                   <input
                     type="text"
                     id="domain_name"
+                autoComplete="off" minLength={1} maxLength={255}
+                aria-invalid={Boolean(errors.domain_name)} aria-describedby="domain_name-feedback"
                     value={domainName}
                     onChange={(e) => setDomainName(e.target.value)}
                     className="input-modern input-icon-left"
@@ -112,6 +125,7 @@ const AddPasswordForm = () => {
                     required
                   />
                 </div>
+              <FieldFeedback id="domain_name-feedback" error={errors.domain_name} help="1–255 characters." />
               </div>
 
               <div>
@@ -127,6 +141,8 @@ const AddPasswordForm = () => {
                   <input
                     type={showPassword ? "text" : "password"}
                     id="password"
+                autoComplete="off" maxLength={4096}
+                aria-invalid={Boolean(errors.password)} aria-describedby="password-feedback"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="input-modern input-icon-left input-icon-right"
@@ -149,7 +165,8 @@ const AddPasswordForm = () => {
                     
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword(!showPassword)}
                       className="px-1 focus:outline-none"
                     >
                       {showPassword ? (
@@ -166,6 +183,8 @@ const AddPasswordForm = () => {
                   </div>
                 </div>
                 
+                <FieldFeedback id="password-feedback" error={errors.password} help="Store the exact existing password; up to 4096 characters." />
+
                 {password && (
                   <div className="mt-2">
                     <div className="w-full bg-gray-700 rounded-full h-1.5">
@@ -205,6 +224,7 @@ const AddPasswordForm = () => {
                         </label>
                         <input
                           type="range"
+                      aria-label="Generated password length"
                           min="8"
                           max="32"
                           value={passwordOptions.length}
@@ -272,12 +292,15 @@ const AddPasswordForm = () => {
                   <input
                     type="url"
                     id="link"
+                autoComplete="url" inputMode="url" maxLength={200}
+                aria-invalid={Boolean(errors.link)} aria-describedby="link-feedback"
                     value={link}
                     onChange={(e) => setLink(e.target.value)}
                     className="input-modern input-icon-left"
                     placeholder="https://example.com/login"
                   />
                 </div>
+              <FieldFeedback id="link-feedback" error={errors.link} help="Optional http:// or https:// URL, up to 200 characters." />
               </div>
 
               <div className="pt-2">
