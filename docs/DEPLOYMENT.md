@@ -41,12 +41,13 @@ Validate with synthetic data before inviting public users.
 Render's free web services block outbound SMTP ports 25, 465 and 587, so the default
 Gmail SMTP configuration will not send OTP mail on that tier. See
 [Render's free-service limits](https://render.com/docs/free).
-Do not disable OTP or accept arbitrary codes as a workaround. Use an existing
-approved HTTPS mail backend/provider by setting EMAIL_BACKEND and installing its
-locked dependency, or manually choose an appropriate service tier after reviewing
-costs. No service is registered and no paid upgrade is performed here. Until a real
-email path works, public-demo signup/enrollment/vault unlock testing is incomplete.
-Free PostgreSQL retention/expiry limits also need manual review on that same page.
+The application now includes the pinned Anymail Resend HTTPS backend. Configure
+EMAIL_BACKEND, RESEND_API_KEY and DEFAULT_FROM_EMAIL privately as described in
+[Resend setup](EMAIL_VALIDATION.md). The user has confirmed the sender domain is
+verified and an existing Sending-access key is available; no purchase or account
+registration is needed. Do not disable OTP or accept arbitrary codes as a workaround.
+Live inbox delivery still requires a post-deployment check. Review current provider
+quotas manually; no upgrade or billing action is performed by this change.
 
 ## Vercel frontend
 

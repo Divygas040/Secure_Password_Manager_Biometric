@@ -14,14 +14,15 @@ are ignored; `.env.example` is the only tracked environment template.
 | CORS_ALLOWED_ORIGINS | Comma-separated exact frontend origins |
 | CSRF_TRUSTED_ORIGINS | Comma-separated exact trusted frontend origins |
 | DATABASE_URL | Private PostgreSQL URL, mandatory when DEBUG is false |
-| EMAIL_BACKEND | Django email backend import path; defaults to SMTP |
+| EMAIL_BACKEND | Django email backend import path; production defaults to Anymail Resend; local defaults to SMTP |
+| RESEND_API_KEY | Existing private Sending-access key; required when Resend is selected |
 | EMAIL_HOST | SMTP server |
 | EMAIL_PORT | SMTP port |
 | EMAIL_USE_TLS | SMTP STARTTLS toggle |
 | EMAIL_USE_SSL | SMTP implicit TLS toggle; do not enable together with STARTTLS |
 | EMAIL_HOST_USER | SMTP authentication identity; required for production SMTP |
 | EMAIL_HOST_PASSWORD | SMTP credential; required for production SMTP |
-| DEFAULT_FROM_EMAIL | Verified sender; defaults to SMTP identity |
+| DEFAULT_FROM_EMAIL | Verified sender; defaults to the configured BioPass identity for Resend, SMTP identity otherwise |
 | COOKIE_SAMESITE | Lax for local/same-site domains; None only for HTTPS cross-site previews |
 | TRUST_PROXY_HTTPS | Trust X-Forwarded-Proto only behind a trusted terminating proxy |
 | TRUSTED_PROXY_COUNT | Number of trusted proxies for source-IP throttling; defaults zero |
@@ -53,3 +54,5 @@ For custom mail backends, install and lock the backend's dependency and configur
 its credentials through the host's private environment editor. Never log email
 bodies; they contain verification codes. No email account or paid service has been
 registered by this change.
+
+See [Resend configuration](EMAIL_VALIDATION.md) for the already-verified production sender and manual deployment steps.

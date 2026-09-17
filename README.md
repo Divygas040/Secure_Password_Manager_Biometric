@@ -78,7 +78,7 @@ Replace every placeholder in the ignored backend `.env` before starting:
 - Set `COOKIE_SAMESITE=Lax`, `TRUST_PROXY_HTTPS=False`, `TRUSTED_PROXY_COUNT=0`,
   `SECURE_HSTS_SECONDS=0`.
 - Configure an email backend and your own credentials if using email verification.
-  SMTP is the default. Local automated tests use in-memory mail; they do not send
+  Local SMTP remains available; production defaults to Anymail/Resend over HTTPS. Local automated tests use in-memory mail; they do not send
   real emails or expose verification codes. Do not use console/file mail in production.
 - The template lists optional email fields too: use your provider's actual port,
   TLS/SSL requirements and verified sender. Do not leave placeholder strings in place.
@@ -129,6 +129,7 @@ coverage are confirmed; do not blindly enable preload to silence them.
 
 - [Deployment instructions](docs/DEPLOYMENT.md)
 - [Required configuration](docs/ENVIRONMENT.md)
+- [Resend setup and input validation](docs/EMAIL_VALIDATION.md)
 - [Legacy data and key operations](docs/DATA_MIGRATION.md)
 - [Deployment checklist](DEPLOYMENT_CHECKLIST.md)
 - [Baseline audit](docs/BASELINE_AUDIT.md)
