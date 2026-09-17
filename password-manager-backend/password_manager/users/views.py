@@ -1,5 +1,6 @@
 import json
 import secrets
+from math import ceil
 from datetime import timedelta
 from time import time
 
@@ -162,8 +163,20 @@ class SendOTPView(ProtectedAPIView):
                 and (now - user.otp_sent_at).total_seconds()
                 < settings.OTP_RESEND_SECONDS
             ):
+                wait = max(
+                    1,
+                    ceil(
+                        settings.OTP_RESEND_SECONDS
+                        - (now - user.otp_sent_at).total_seconds()
+                    ),
+                )
                 return Response(
-                    {"detail": "Wait before requesting another code."}, status=429
+                    {
+                        "detail": "Wait before requesting another code.",
+                        "retry_after": wait,
+                    },
+                    status=429,
+                    headers={"Retry-After": str(wait)},
                 )
             code = f"{secrets.randbelow(1_000_000):06d}"
             user.otp_session = session_digest(request)

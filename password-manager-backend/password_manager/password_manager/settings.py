@@ -68,6 +68,7 @@ if not DEBUG and (not CORS_ALLOWED_ORIGINS or not CSRF_TRUSTED_ORIGINS):
         "Production requires CORS_ALLOWED_ORIGINS and CSRF_TRUSTED_ORIGINS."
     )
 CORS_ALLOW_CREDENTIALS = True
+CORS_EXPOSE_HEADERS = ["Retry-After"]
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_URLS_REGEX = r"^/api/.*$"
 
@@ -196,7 +197,12 @@ OTP_TTL_SECONDS = 300
 OTP_RESEND_SECONDS = 60
 OTP_MAX_ATTEMPTS = 5
 EMAIL_BACKEND = env(
-    "EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend"
+    "EMAIL_BACKEND",
+    default=(
+        "django.core.mail.backends.smtp.EmailBackend"
+        if DEBUG
+        else "anymail.backends.resend.EmailBackend"
+    ),
 )
 if not DEBUG and EMAIL_BACKEND in (
     "django.core.mail.backends.console.EmailBackend",
@@ -211,7 +217,19 @@ EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
 EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
 EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
-DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER)
+DEFAULT_FROM_EMAIL = env(
+    "DEFAULT_FROM_EMAIL",
+    default=(
+        "BioPass <security@biopassmanager.online>"
+        if EMAIL_BACKEND == "anymail.backends.resend.EmailBackend"
+        else EMAIL_HOST_USER
+    ),
+)
+ANYMAIL = {"RESEND_API_KEY": env("RESEND_API_KEY", default=""), "REQUESTS_TIMEOUT": 15}
+if EMAIL_BACKEND == "anymail.backends.resend.EmailBackend" and not (
+    ANYMAIL["RESEND_API_KEY"].strip() and DEFAULT_FROM_EMAIL.strip()
+):
+    raise ImproperlyConfigured("Resend requires RESEND_API_KEY and DEFAULT_FROM_EMAIL.")
 if (
     not DEBUG
     and EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend"

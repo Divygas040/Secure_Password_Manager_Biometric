@@ -1,3 +1,8 @@
+import unicodedata
+
+from django.contrib.auth.validators import ASCIIUsernameValidator
+from django.core.validators import URLValidator
+from rest_framework.validators import UniqueValidator
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from rest_framework import serializers
@@ -7,7 +12,36 @@ from .permissions import VaultUnlocked
 
 
 class UserSignupSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(required=True)
+    username = serializers.CharField(
+        min_length=3,
+        max_length=30,
+        trim_whitespace=True,
+        validators=[
+            ASCIIUsernameValidator(
+                message="Use letters, numbers and @ . + - _ only. No spaces."
+            ),
+            UniqueValidator(
+                queryset=CustomUser.objects.all(),
+                message="Unable to register with these details.",
+            ),
+        ],
+    )
+    phone = serializers.RegexField(
+        r"\A[0-9]{10,15}\Z",
+        min_length=10,
+        max_length=15,
+        trim_whitespace=False,
+        error_messages={
+            "invalid": "Use 10–15 ASCII digits with no spaces or punctuation."
+        },
+        validators=[
+            UniqueValidator(
+                queryset=CustomUser.objects.all(),
+                message="Unable to register with these details.",
+            )
+        ],
+    )
+    email = serializers.EmailField(required=True, max_length=254)
     password = serializers.CharField(
         write_only=True, min_length=12, max_length=128, trim_whitespace=False
     )
@@ -42,12 +76,21 @@ class UserSignupSerializer(serializers.ModelSerializer):
 
 
 class LoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    email = serializers.EmailField(max_length=254)
     password = serializers.CharField(max_length=128, trim_whitespace=False)
+
+    def validate_email(self, value):
+        return value.strip().lower()
 
 
 class OTPSerializer(serializers.Serializer):
-    otp = serializers.RegexField(r"^[0-9]{6}$", max_length=6)
+    otp = serializers.RegexField(
+        r"\A[0-9]{6}\Z",
+        min_length=6,
+        max_length=6,
+        trim_whitespace=False,
+        error_messages={"invalid": "Enter exactly 6 ASCII digits."},
+    )
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -57,6 +100,24 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class PasswordSerializer(serializers.ModelSerializer):
+    domain_name = serializers.CharField(
+        min_length=1, max_length=255, trim_whitespace=True
+    )
+    link = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=200,
+        trim_whitespace=True,
+        validators=[URLValidator(schemes=["http", "https"])],
+    )
+
+    def validate_domain_name(self, value):
+        if not any(unicodedata.category(char)[0] not in "CZ" for char in value):
+            raise serializers.ValidationError(
+                "Enter a visible service or display name."
+            )
+        return value
+
     password = serializers.CharField(
         write_only=True, max_length=4096, trim_whitespace=False
     )
@@ -67,7 +128,7 @@ class PasswordSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
     def validate_link(self, value):
-        if value and not value.startswith(("https://", "http://")):
+        if value and not value.lower().startswith(("https://", "http://")):
             raise serializers.ValidationError("Use an HTTP or HTTPS URL.")
         return value
 

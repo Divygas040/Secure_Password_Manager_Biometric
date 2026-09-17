@@ -35,6 +35,8 @@ services:
       - key: CSRF_TRUSTED_ORIGINS
         sync: false
       - key: EMAIL_BACKEND
+        value: anymail.backends.resend.EmailBackend
+      - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_HOST
         sync: false
@@ -45,4 +47,4 @@ services:
       - key: EMAIL_HOST_PASSWORD
         sync: false
       - key: DEFAULT_FROM_EMAIL
-        sync: false
+        value: BioPass <security@biopassmanager.online>

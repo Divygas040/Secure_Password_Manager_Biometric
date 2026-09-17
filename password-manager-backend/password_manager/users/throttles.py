@@ -4,7 +4,6 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
 from rest_framework.throttling import BaseThrottle
-from rest_framework.settings import api_settings
 from .models import RateLimitBucket
 
 RATES = {
@@ -30,7 +29,7 @@ class DatabaseThrottle(BaseThrottle):
             if isinstance(email, str):
                 identities.append("email:" + email.strip().lower()[:254])
         allowed = True
-        self.remaining = seconds
+        self.remaining = 0
         for identity in identities:
             key = salted_hmac("rate-limit", scope + ":" + identity).hexdigest()
             with transaction.atomic():
@@ -43,6 +42,7 @@ class DatabaseThrottle(BaseThrottle):
                     bucket.started_at, bucket.count = now, 0
                 if bucket.count >= limit:
                     allowed = False
+                    self.remaining = max(self.remaining, max(0, seconds - elapsed))
                 else:
                     bucket.count += 1
                     bucket.save(update_fields=["started_at", "count"])
