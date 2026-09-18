@@ -2,8 +2,6 @@ export type FieldErrors = Record<string, string>;
 export const USERNAME_PATTERN = '[A-Za-z0-9@.+_\\-]{3,30}';
 export const USERNAME_HELP = '3–30 characters. Letters, numbers and @ . + - _ only. No spaces.';
 export const normalizeEmail = (value: string) => value.trim().toLowerCase();
-export const normalizeOTP = (value: string) => value.replace(/[^0-9]/g, '').slice(0, 6);
-export const validOTP = (value: string) => value.length === 6 && /^[0-9]{6}$/.test(value);
 const length = (value: string) => Array.from(value).length;
 
 export function validateEmail(value: string): string | undefined {

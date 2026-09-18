@@ -42,7 +42,7 @@ export default function HomePage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl w-full mb-12">
         {[
           { title: "Face Verification", icon: "👤", desc: "Camera-based demo verification" },
-          { title: "OTP Authentication", icon: "🔢", desc: "Extra layer of security" },
+          { title: "Protected Face Setup", icon: "🔒", desc: "Confirm your password before first enrollment" },
           { title: "Secure Storage", icon: "🔒", desc: "Server-side encryption at rest" }
         ].map((feature, index) => (
           <div 

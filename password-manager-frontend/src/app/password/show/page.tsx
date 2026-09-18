@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import OTPAuth from '@/components/OTPAuth';
+import { NO_FACE_MESSAGE } from '@/lib/enrollment';
 import FaceVerification from '@/components/FaceID';
 interface Credential { id: number; domain_name: string; link: string; password: string; }
 
@@ -36,9 +36,10 @@ export default function ShowPasswords() {
     <main className="max-w-4xl mx-auto px-4 py-12"><div className="glass-card p-8 space-y-6">
       <h1 className="text-3xl font-bold">Your vault</h1>
       {rows === null ? <><p className="text-gray-400">Verify to unlock for five minutes. Passwords are hidden when you leave this tab.</p>
-        <OTPAuth onSuccess={() => void load()} />
-        {user.face_enrolled && <FaceVerification onSuccess={() => void load()} />}
-        <button className="btn-modern bg-gray-700" onClick={load}>Open recently unlocked vault</button>
+        {user.face_enrolled ? <>
+          <FaceVerification onSuccess={() => void load()} />
+          <button className="btn-modern bg-gray-700" onClick={load}>Open recently unlocked vault</button>
+        </> : <><p>{NO_FACE_MESSAGE}</p><Link className="btn-modern btn-primary" href="/dashboard">Set up face verification</Link></>}
       </> : <><div className="flex gap-4"><Link className="btn-modern btn-primary" href="/password/add">Add password</Link>
         <button className="btn-modern bg-gray-700" onClick={async () => { clear(); try { await api('/api/users/lock/', { method: 'POST' }); } catch { toast.error('Server lock failed; local credentials cleared.'); } }}>Lock vault</button></div>
         {rows.length === 0 && <p>No passwords saved yet.</p>}

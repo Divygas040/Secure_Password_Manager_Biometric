@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateSignup, validateLogin, validateVault, normalizeEmail, normalizeOTP, validOTP, validateFaceImage, USERNAME_PATTERN } from '../src/lib/validation.ts';
+import { validateSignup, validateLogin, validateVault, normalizeEmail, validateFaceImage, USERNAME_PATTERN } from '../src/lib/validation.ts';
 import { formatApiError, formError, ApiError, api } from '../src/lib/api.ts';
 const signup = { username: 'TestUser', phone: '1234567890', email: 'test@example.com', password: 'Strong-fixture!42', terms: true };
 
@@ -34,12 +34,6 @@ test('vault preserves existing passwords and permits legitimate display names', 
   for (const password of ['', 'x'.repeat(4097)]) assert.ok(validateVault({ ...values, password }).password);
   for (const link of ['', ' https://example.com/path ', 'http://example.com']) assert.equal(validateVault({ ...values, link }).link, undefined);
   for (const link of ['ftp://example.com', 'javascript:alert(1)', 'https://', 'https:example.com', 'not a URL', 'https://example.com/' + 'x'.repeat(201)]) assert.ok(validateVault({ ...values, link }).link);
-});
-
-test('OTP accepts six ASCII digits only and normalizes paste', () => {
-  assert.equal(normalizeOTP('a12-34 56７89'), '123456');
-  assert.equal(validOTP('123456'), true);
-  for (const value of ['', '12345', '1234567', '１２３４５６', '123456\n']) assert.equal(validOTP(value), false);
 });
 
 test('face capture rejects unsupported MIME types, empty and oversized files', () => {

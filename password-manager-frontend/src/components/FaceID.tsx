@@ -39,7 +39,7 @@ export default function FaceVerification({ enroll = false, onSuccess }: { enroll
       stream.current = capture;
       setOpen(true);
       if (video.current) { video.current.srcObject = capture; await video.current.play(); }
-    } catch { stop(); toast.error('Camera unavailable. Use email verification.'); }
+    } catch { stop(); toast.error('Camera unavailable. Please try again.'); }
     finally { submitting.current = false; setBusy(false); }
   };
   const submit = async () => {
