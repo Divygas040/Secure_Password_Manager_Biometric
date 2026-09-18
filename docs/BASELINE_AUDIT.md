@@ -12,12 +12,12 @@ builds of unbounded biometric dependencies. Three requirements lists diverge.
 Critical findings:
 - Password.password stores plaintext; misleading hash/encryption comments.
 - Signup prints credentials; frontend prints signup data and JWT response.
-- OTP is persisted plaintext, accepted repeatedly without expiry or attempt
+- The former challenge mechanism persisted plaintext and accepted reuse without expiry or attempt
   limit, placed in GET query parameters and printed to logs.
-- Standalone auth/face/OTP components simulate success with client state.
+- Standalone auth/face/challenge components simulate success with client state.
 - Face checks do not create a backend vault authorization grant.
 - Raw face photos remain in Image.image_data; endpoints leak exception detail.
-- No login/OTP/face throttles, email uniqueness is only application checked.
+- No login/challenge/face throttles, email uniqueness is only application checked.
 - localStorage is accessed while rendering client components during SSR.
 - Multiple face-api model loaders, external model source, missing stream cleanup.
 - Password generator uses Math.random; public claims exaggerate protections.
@@ -33,8 +33,8 @@ Baseline checks in a clean worktree using the previous isolated environment:
 - makemigrations --check --dry-run: PASS, no drift.
 - manage.py test: zero tests found.
 - Earlier raw requirements installation selected OpenCV 5, which broke the
-  CascadeClassifier import. pyotp was missing; legacy face-recognition requires
-  pkg_resources. Previous checks needed OpenCV 4, pyotp and setuptools<81.
+  CascadeClassifier import. a retired challenge library was missing; legacy face-recognition requires
+  pkg_resources. Previous checks needed OpenCV 4, a retired challenge library and setuptools<81.
 
 Frontend baseline build/lint/audit results are recorded in VALIDATION.md after
 completion. Baseline tooling also initially used a resolved Python symlink

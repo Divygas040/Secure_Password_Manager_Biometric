@@ -36,19 +36,6 @@ Validate with synthetic data before inviting public users.
    manual validation workflow/Render build. Native dlib compilation passed locally
    on Python 3.12; that alone does not prove a Render image build or memory fit.
 
-### Email on a no-cost Render preview
-
-Render's free web services block outbound SMTP ports 25, 465 and 587, so the default
-Gmail SMTP configuration will not send OTP mail on that tier. See
-[Render's free-service limits](https://render.com/docs/free).
-The application now includes the pinned Anymail Resend HTTPS backend. Configure
-EMAIL_BACKEND, RESEND_API_KEY and DEFAULT_FROM_EMAIL privately as described in
-[Resend setup](EMAIL_VALIDATION.md). The user has confirmed the sender domain is
-verified and an existing Sending-access key is available; no purchase or account
-registration is needed. Do not disable OTP or accept arbitrary codes as a workaround.
-Live inbox delivery still requires a post-deployment check. Review current provider
-quotas manually; no upgrade or billing action is performed by this change.
-
 ## Vercel frontend
 
 1. Import the same repository and branch. Root directory:
@@ -59,7 +46,7 @@ quotas manually; no upgrade or billing action is performed by this change.
    never put credentials into it. Do not put backend keys in Vercel public variables.
 4. A normal vercel.app preview is sufficient. Configure the exact preview origin on
    Render in both CORS_ALLOWED_ORIGINS and CSRF_TRUSTED_ORIGINS; do not use wildcards.
-5. Test signup, login, logout, email verification, vault operations, camera permissions,
+5. Test signup, login, logout, current-password confirmation, face enrollment/replacement, vault operations, camera permissions,
    and reload/session expiry from the browser. Production camera access needs HTTPS.
 
 ## Cookies: development, preview and custom domains
@@ -112,3 +99,16 @@ is a same-major patch resolving transitive advisories without forcing Next 16.
 See [Next.js's August security release](https://nextjs.org/blog/august-2026-security-release).
 The Django API follows the framework's
 [CSRF guidance](https://docs.djangoproject.com/en/5.2/howto/csrf/).
+
+## Biometric authorization release checks
+
+Confirm first enrollment requires a freshly confirmed current password. Confirm
+replacement requires the current face and locks all old template grants. Existing
+vault grants must be re-established by face verification after this release. There
+is no alternate delivery-based recovery flow. The existing custom domains remain
+www.biopassmanager.online (frontend) and api.biopassmanager.online (API); PostgreSQL
+continues to use a private connection URL and has no public domain.
+
+Previously configured message-delivery variables may be removed manually only
+after the new release starts successfully. This branch does not change the real
+Render environment. Keep the database URL, Django secret and both encryption keys.

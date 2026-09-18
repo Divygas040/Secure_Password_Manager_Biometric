@@ -4,11 +4,11 @@ Back up the database and encryption keys securely offline before upgrading. Stop
 old app instances first; they must not write plaintext while migration is running.
 Never upload database backups, face photos or keys to GitHub.
 
-`users/0011_vault_sessions_otp_biometrics.py` adds OTP security state, encrypted face
+`users/0011_vault_sessions_otp_biometrics.py` adds historical security state, encrypted face
 templates and shared throttle counters. It widens the password column to encrypted
 text and encrypts **every** pre-0011 credential, including strings that happen to
 look like ciphertext. It normalizes email case and refuses blank/duplicate emails
-instead of merging or discarding accounts. Expired legacy OTP secrets/codes are
+instead of merging or discarding accounts. Expired legacy challenge secrets are
 invalidated. The migration is atomic and intentionally has no plaintext rollback.
 A failed migration must be diagnosed and rerun, not faked as applied.
 
@@ -58,3 +58,15 @@ backup before switching services. Automated key rotation is not implemented.
 Run `python manage.py cleanup_security_state` daily using an existing approved
 scheduler to clear expired sessions/challenges and old rate-limit buckets. No paid
 scheduled resource is created here. Never log session rows or challenge contents.
+
+## Current field-removal migration
+
+Migration 0012 removes only seven retired account challenge fields. Historical
+migrations, including 0011, remain unchanged. The new migration does not recreate
+users or touch saved credential ciphertext, biometric templates, sessions or rate
+limit records. A disposable migration rehearsal compares those records and their
+ciphertext before and after the upgrade and verifies decryption. Back up first.
+
+An application rollback requires restoring a compatible schema and release; dropped
+challenge values cannot be recovered by reversing the schema operation. They are
+not part of the new authorization flow. Stored encryption keys must remain stable.

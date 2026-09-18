@@ -23,4 +23,4 @@ The Vercel root is `password-manager-frontend`. See the root
 [deployment guide](../docs/DEPLOYMENT.md) for cross-site preview cookies and final
 custom-domain settings. The camera component captures images; face detection and
 comparison run on the server. Client face-api.js models/CDN loading are unnecessary
-and no longer used. Enrollment requires email verification on the backend.
+and no longer used. Initial enrollment requires fresh current-password confirmation; replacement requires current-face verification on the backend.

@@ -14,7 +14,6 @@ values or credentials in this file.
 - [ ] CSRF_TRUSTED_ORIGINS configured exactly
 - [ ] ALLOWED_HOSTS configured without wildcards
 - [ ] Cookie SameSite and proxy settings verified for the actual deployment
-- [ ] Production email configured and actually delivering codes
 - [ ] PostgreSQL integration/concurrency tests passed in the manual workflow
 - [ ] Linux Docker build passed; service memory use measured with face verification
 - [ ] Existing data backed up and legacy migration/conversion reviewed
@@ -25,7 +24,6 @@ values or credentials in this file.
 - [ ] Signup works
 - [ ] Login, idle/absolute expiry and logout work
 - [ ] Face enrollment and real face verification work (including a rejected mismatch)
-- [ ] OTP expiry, attempts, replay rejection, resend and delivery work
 - [ ] Password encryption verified in the production database without logging values
 - [ ] Cross-user authorization and CSRF tested on hosted origins
 - [ ] Legacy plaintext backups/media retention resolved securely
@@ -39,3 +37,11 @@ values or credentials in this file.
 - [ ] HSTS policy reviewed after HTTPS validation
 - [ ] Final security test completed; known demo risks accepted
 - [ ] production-hardening reviewed before any merge to main
+
+- [ ] Fresh current password is required for first face enrollment
+- [ ] Initial enrollment authorization expires and is consumed once
+- [ ] Current face is required for replacement
+- [ ] Replacement invalidates old vault grants and requires new-face verification
+- [ ] Five-minute vault expiry, explicit lock and logout are verified
+- [ ] No-face users see setup guidance and cannot access credentials
+- [ ] Review lack of liveness detection and lack of alternate account recovery

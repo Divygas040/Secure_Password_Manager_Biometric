@@ -1,55 +1,46 @@
-# Validation record
+# Validation for the current authorization flow
 
-Validated locally on macOS ARM64, Python 3.12.14, Django 5.2.17. Test secrets and
-databases were disposable and excluded from Git. No deployment was performed.
+The release replaces the retired delivery-based authorization flow with fresh
+current-password confirmation for first face enrollment and current-face verification
+for replacement. It keeps encrypted storage, server sessions, CSRF, CORS and throttling.
 
-| Check | Result |
-| --- | --- |
-| Django `check` | Passed; zero issues |
-| Django `check --deploy`, production configuration | Exit 0; two intentional warnings: security.W005 and security.W021 (HSTS subdomains/preload disabled) |
-| `makemigrations --check` | Passed; no drift |
-| Django tests | 31 discovered: 30 passed, one PostgreSQL concurrency test skipped on SQLite |
-| Disposable database migration rehearsal | Passed; legacy credentials and photo bytes preserved as ciphertext |
-| `migrate`, `check_data_ready`, `collectstatic` | Passed on local disposable database |
-| `pip check` | Passed; no broken requirements |
-| Native biometric dependency installation | Passed, including dlib compilation and real detector rejection of a blank image |
-| `npm ci` | Passed |
-| Frontend unit tests | Two passed, zero failed |
-| Frontend lint | Passed |
-| Next.js production build | Passed; eight routes prerendered |
-| `npm audit` | Passed; zero vulnerabilities |
-| Local browser smoke | Login and dashboard/vault verification screen exercised |
-| Git diff whitespace / tracked secret-artifact review | Passed |
+Tests use disposable databases and synthetic captures; successful face comparison
+is mocked in authorization tests. A real installed detector is also exercised on
+a non-face image. No live production requests or deployments are part of validation.
 
-## Baseline and resolved failures
+PostgreSQL row-lock concurrency cannot run on SQLite. The dedicated concurrency
+test verifies that simultaneous first-enrollment requests cannot overwrite the first
+accepted template. Its workers explicitly close their thread-local DB connections.
+Run the manually triggered PostgreSQL workflow before release to exercise it.
 
-The original backend had no tests and six deployment warnings. The baseline frontend
-lockfile did not support a clean npm install; lint could not start after the install
-failure. Its audit reported 62 advisories (one critical, 26 high, 28 moderate, seven
-low). Dependencies and the lockfile were corrected without a Next.js/React major
-upgrade. An incompatible unbounded OpenCV install and missing OTP dependency were
-encountered in the original stack; obsolete implementations were replaced with the
-existing face-recognition detector and cryptographic OTP generation. An invalid
-DATABASE_URL parser argument found during verification was corrected. Generated
-Next.js output was excluded from lint. A network-failed audit was rerun successfully.
+Remaining manual checks: real camera enrollment and matching, hosted sessions,
+HTTPS, migration on a backed-up production database, and runtime resource sizing.
+Face matching has no liveness protection, no alternate recovery flow and no claim
+of production-grade identity assurance. Server operators holding keys can decrypt
+data. Use only synthetic vault credentials for this educational demo.
 
-## Validation gaps and remaining risks
+## Results for this release
 
-- PostgreSQL could not initialize locally because the sandbox denied shared-memory
-  allocation. The row-lock concurrency test is explicitly skipped on SQLite.
-- Docker is unavailable locally. The Linux image build, PostgreSQL integration and
-  hosted resource sizing remain unverified. Run the manual validation workflow before
-  public deployment; it includes PostgreSQL and a Docker build.
-- Live SMTP delivery, real face enrollment/matching, hosted cookies, HTTPS and DNS
-  remain manual end-to-end checks. Unit tests mock successful face matches; a real
-  installed detector was tested only on a non-face image.
-- Camera face matching has no liveness/anti-spoofing protection. Use only synthetic
-  vault data for this demo; server operators can decrypt data with the keys.
-- The face-recognition models dependency emits a pkg_resources deprecation warning;
-  setuptools is pinned below the removal version. Node emits a harmless module-type
-  autodetection warning during the small test suite.
-- HSTS subdomain/preload warnings are intentional until domain ownership and HTTPS
-  coverage are confirmed. This is not an independent security audit or certification.
-
-The GitHub workflow runs only when manually dispatched. No billing, deployment,
-provider-resource creation, domain purchase or workflow execution was performed.
+- Django `check`: passed, zero issues.
+- `makemigrations --check`: no drift; generated migration 0012 reviewed as seven
+  RemoveField operations only. Historical migrations were not edited.
+- `migrate`: passed on a disposable local SQLite database.
+- Backend: 51 discovered, 50 passed and one PostgreSQL-only concurrency test skipped;
+  database teardown completed. Includes preservation of stored records/ciphertext,
+  password-confirmation authorization, replacement restrictions, template-version
+  revocation across sessions, expiry/lock/logout, validation, encryption and CSRF.
+- PostgreSQL initialization was attempted locally; the sandbox denied shared-memory
+  allocation (`shmget`). The row-lock test has not been claimed as passed.
+- `pip check`: passed after removing the delivery library and its exclusive HTTP
+  dependencies from the workspace runtime. No retained runtime dependency requires them.
+- Frontend: clean `npm ci` passed; 17 tests passed; lint and production build passed.
+  The install audit reported zero vulnerabilities. Tests cover initial/replacement
+  sequence, exact password handling, clearing on success/failure, duplicate guards,
+  no-face guidance and safe API errors.
+- Browser smoke on the compiled local app: login, no-face vault guidance, first
+  enrollment password form, generic incorrect-password error, successful transition
+  to the camera step and logout passed using a disposable account. No face was captured.
+- Benign existing warnings remain for deprecated pkg_resources in the face-model
+  package and Node's TypeScript module-type detection. No application test failed.
+- No production behavior, real face matching, Docker build or deployment was verified
+  by this release. No hosted secrets, resources or billing settings were changed.
