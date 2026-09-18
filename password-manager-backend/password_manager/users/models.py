@@ -14,13 +14,6 @@ class CustomUser(AbstractUser):
         null=True,
         related_name="user_face_image",
     )
-    otp_secret = models.CharField(max_length=255, blank=True, null=True)
-    otp_generated = models.CharField(max_length=255, blank=True, null=True)
-    otp_digest = models.CharField(max_length=64, blank=True)
-    otp_expires_at = models.DateTimeField(null=True, blank=True)
-    otp_sent_at = models.DateTimeField(null=True, blank=True)
-    otp_attempts = models.PositiveSmallIntegerField(default=0)
-    otp_session = models.CharField(max_length=64, blank=True)
 
     class Meta(AbstractUser.Meta):
         constraints = [

@@ -1,19 +1,15 @@
 import json
-import re
-from datetime import timedelta
 from io import BytesIO
 from time import time
 from unittest.mock import patch
 
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
-from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
 from django.test import TestCase, override_settings
-from django.utils import timezone
 from PIL import Image as PILImage
 from rest_framework.test import APIClient
 
@@ -24,7 +20,6 @@ from .biometrics import extract_encoding
 PASS = "Unit-test-password!42"
 
 
-@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class SecurityTests(TestCase):
     def setUp(self):
         self.a = CustomUser.objects.create_user(
@@ -48,12 +43,18 @@ class SecurityTests(TestCase):
 
     def unlock(self, client=None):
         client = client or self.client
-        self.assertEqual(client.post("/api/users/send-otp-email/").status_code, 200)
-        code = re.search(r"\b\d{6}\b", mail.outbox[-1].body).group()
-        self.assertEqual(
-            client.post("/api/users/verify-otp/", {"otp": code}).status_code, 200
+        user = CustomUser.objects.get(pk=client.session["_auth_user_id"])
+        BiometricTemplate.objects.get_or_create(
+            user=user, defaults={"encoding": json.dumps([0.1] * 128)}
         )
-        return code
+        with patch("users.biometrics.extract_encoding", return_value=[0.1] * 128):
+            self.assertEqual(
+                client.post(
+                    "/api/users/verify-face/",
+                    {"image": SimpleUploadedFile("face.png", b"fixture")},
+                ).status_code,
+                200,
+            )
 
     def new_password(self, user=None, value="vault test credential"):
         return Password.objects.create(
@@ -127,7 +128,7 @@ class SecurityTests(TestCase):
         anon = APIClient()
         for url in ["passwords/", "me/", "image/"]:
             self.assertEqual(anon.get("/api/users/" + url).status_code, 401)
-        for url in ["image-upload/", "verify-face/", "send-otp-email/", "verify-otp/"]:
+        for url in ["image-upload/", "verify-face/", "confirm-password/"]:
             self.assertEqual(anon.post("/api/users/" + url).status_code, 401)
 
     def test_locked_vault_requires_server_verification(self):
@@ -219,66 +220,6 @@ class SecurityTests(TestCase):
         with self.assertRaises(InvalidToken):
             decrypt(Ciphertext(str(p.password)[:-8] + "invalid!"))
 
-    def test_otp_hash_expiry_one_time_and_post_only(self):
-        self.assertEqual(self.client.get("/api/users/send-otp-email/").status_code, 405)
-        self.assertEqual(self.client.get("/api/users/verify-otp/").status_code, 405)
-        self.assertEqual(
-            self.client.post("/api/users/send-otp-email/").status_code, 200
-        )
-        code = re.search(r"\b\d{6}\b", mail.outbox[-1].body).group()
-        self.a.refresh_from_db()
-        self.assertNotEqual(self.a.otp_digest, code)
-        self.assertIsNone(self.a.otp_generated)
-        self.a.otp_expires_at = timezone.now() - timedelta(seconds=1)
-        self.a.save()
-        self.assertEqual(
-            self.client.post("/api/users/verify-otp/", {"otp": code}).status_code, 400
-        )
-        self.a.otp_expires_at = timezone.now() + timedelta(seconds=60)
-        self.a.save()
-        self.assertEqual(
-            self.client.post("/api/users/verify-otp/", {"otp": code}).status_code, 200
-        )
-        self.assertEqual(
-            self.client.post("/api/users/verify-otp/", {"otp": code}).status_code, 400
-        )
-        self.a.refresh_from_db()
-        self.assertEqual(self.a.otp_digest, "")
-
-    def test_otp_cooldown_attempt_lockout_and_session_binding(self):
-        self.assertEqual(
-            self.client.post("/api/users/send-otp-email/").status_code, 200
-        )
-        self.assertEqual(
-            self.client.post("/api/users/send-otp-email/").status_code, 429
-        )
-        code = re.search(r"\b\d{6}\b", mail.outbox[-1].body).group()
-        other = APIClient()
-        self.login(other)
-        self.assertEqual(
-            other.post("/api/users/verify-otp/", {"otp": code}).status_code, 400
-        )
-        wrong = "000000" if code != "000000" else "111111"
-        for _ in range(4):
-            self.assertEqual(
-                self.client.post("/api/users/verify-otp/", {"otp": wrong}).status_code,
-                400,
-            )
-        self.assertEqual(
-            self.client.post("/api/users/verify-otp/", {"otp": code}).status_code, 400
-        )
-
-    def test_email_failure_does_not_leak_details_or_leave_code(self):
-        with patch(
-            "users.views.send_mail",
-            side_effect=RuntimeError("private transport details"),
-        ):
-            r = self.client.post("/api/users/send-otp-email/")
-        self.assertEqual(r.status_code, 503)
-        self.assertNotIn("private", str(r.data))
-        self.a.refresh_from_db()
-        self.assertEqual(self.a.otp_digest, "")
-
     def test_vault_grant_expiry_and_lock(self):
         self.unlock()
         session = self.client.session
@@ -291,7 +232,9 @@ class SecurityTests(TestCase):
         self.assertEqual(self.client.post("/api/users/lock/").status_code, 200)
         self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
 
-    def test_enrollment_requires_otp_and_stores_encrypted_template_only(self):
+    def test_initial_enrollment_requires_password_confirmation_and_encrypts_template(
+        self,
+    ):
         image = lambda: SimpleUploadedFile("face.png", b"dummy")
         self.assertEqual(
             self.client.post(
@@ -299,7 +242,12 @@ class SecurityTests(TestCase):
             ).status_code,
             403,
         )
-        self.unlock()
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            200,
+        )
         with patch("users.biometrics.extract_encoding", return_value=[0.1] * 128):
             self.assertEqual(
                 self.client.post(
@@ -316,6 +264,13 @@ class SecurityTests(TestCase):
         self.assertFalse(Image.objects.exists())
         self.assertEqual(self.client.get("/api/users/image/").data, {"enrolled": True})
 
+        self.assertNotIn(
+            "face_enrollment_password_confirmed_until", self.client.session
+        )
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+        # The consumed initial authorization cannot authorize replacement.
+        self.assertEqual(self.client.post("/api/users/image-upload/").status_code, 403)
+
     def test_face_failure_does_not_unlock_or_expose_passwords(self):
         self.new_password()
         BiometricTemplate.objects.create(user=self.a, encoding=json.dumps([0.1] * 128))
@@ -328,7 +283,7 @@ class SecurityTests(TestCase):
         self.assertNotIn("password", r.data)
         self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
 
-    def test_face_success_unlocks_own_vault_but_cannot_replace_enrollment(self):
+    def test_face_success_unlocks_only_own_vault(self):
         BiometricTemplate.objects.create(user=self.a, encoding=json.dumps([0.1] * 128))
         self.new_password()
         self.new_password(self.b)
@@ -339,7 +294,6 @@ class SecurityTests(TestCase):
             )
         self.assertEqual(r.status_code, 200)
         self.assertEqual(len(self.client.get("/api/users/passwords/").data), 1)
-        self.assertEqual(self.client.post("/api/users/image-upload/").status_code, 403)
 
     def test_face_does_not_use_other_users_template(self):
         BiometricTemplate.objects.create(user=self.b, encoding=json.dumps([0.1] * 128))
@@ -397,11 +351,11 @@ class SecurityTests(TestCase):
             HTTP_X_CSRFTOKEN=token,
         )
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(client.post("/api/users/send-otp-email/").status_code, 403)
+        self.assertEqual(client.post("/api/users/confirm-password/").status_code, 403)
         token = client.get("/api/users/csrf/").data["csrfToken"]
         self.assertEqual(
             client.post(
-                "/api/users/send-otp-email/",
+                "/api/users/confirm-password/",
                 HTTP_X_CSRFTOKEN=token,
                 HTTP_ORIGIN="https://evil.example",
             ).status_code,
@@ -409,7 +363,9 @@ class SecurityTests(TestCase):
         )
         self.assertEqual(
             client.post(
-                "/api/users/send-otp-email/", HTTP_X_CSRFTOKEN=token
+                "/api/users/confirm-password/",
+                {"password": PASS},
+                HTTP_X_CSRFTOKEN=token,
             ).status_code,
             200,
         )
@@ -430,3 +386,252 @@ class SecurityTests(TestCase):
         r = self.client.get("/api/users/me/", HTTP_ORIGIN="http://localhost:3000")
         self.assertEqual(r["Access-Control-Allow-Origin"], "http://localhost:3000")
         self.assertEqual(r["Access-Control-Allow-Credentials"], "true")
+
+    def test_password_confirmation_short_lived_and_does_not_unlock_vault(self):
+        with patch("users.views.time", return_value=1000):
+            response = self.client.post(
+                "/api/users/confirm-password/",
+                {"password": PASS, "email": self.b.email},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.client.session["face_enrollment_password_confirmed_until"], 1300
+        )
+        self.assertNotIn(PASS, str(self.client.session.items()))
+        self.assertNotIn(PASS, str(response.data))
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+        with patch("users.views.time", return_value=1300):
+            self.assertEqual(
+                self.client.post("/api/users/image-upload/").status_code, 403
+            )
+        self.assertEqual(BiometricTemplate.objects.count(), 0)
+
+    def test_wrong_confirmation_revokes_marker_and_cannot_select_other_user(self):
+        self.b.set_password("Other-account-password!42")
+        self.b.save()
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            200,
+        )
+        result = self.client.post(
+            "/api/users/confirm-password/",
+            {
+                "password": "Other-account-password!42",
+                "email": self.b.email,
+                "username": self.b.username,
+            },
+        )
+        self.assertEqual(result.status_code, 400)
+        self.assertEqual(result.data, {"detail": "Password confirmation failed."})
+        self.assertNotIn(
+            "face_enrollment_password_confirmed_until", self.client.session
+        )
+        self.assertEqual(self.client.post("/api/users/image-upload/").status_code, 403)
+
+    def test_confirmation_is_bound_to_current_session(self):
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            200,
+        )
+        other = APIClient()
+        self.login(other)
+        self.assertEqual(other.post("/api/users/image-upload/").status_code, 403)
+
+    def test_confirmation_throttled_per_user_and_source(self):
+        for _ in range(5):
+            self.assertEqual(
+                self.client.post(
+                    "/api/users/confirm-password/", {"password": "wrong"}
+                ).status_code,
+                400,
+            )
+        response = self.client.post("/api/users/confirm-password/", {"password": PASS})
+        self.assertEqual(response.status_code, 429)
+        self.assertLessEqual(int(response["Retry-After"]), 300)
+        # Changing the IP does not bypass the account limit.
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/",
+                {"password": PASS},
+                REMOTE_ADDR="192.0.2.1",
+            ).status_code,
+            429,
+        )
+        other = APIClient()
+        self.login(other, self.b.email)
+        self.assertEqual(
+            other.post("/api/users/confirm-password/", {"password": PASS}).status_code,
+            429,
+        )
+
+    def test_logged_in_or_password_confirmed_session_cannot_replace_face(self):
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            200,
+        )
+        template = BiometricTemplate.objects.create(
+            user=self.a, encoding=json.dumps([0.1] * 128)
+        )
+        before = BiometricTemplate.objects.get(pk=template.pk).encoding
+        self.assertEqual(self.client.post("/api/users/image-upload/").status_code, 403)
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            403,
+        )
+        self.assertEqual(BiometricTemplate.objects.get(pk=template.pk).encoding, before)
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+
+    def test_face_replacement_requires_current_face_and_invalidates_all_old_grants(
+        self,
+    ):
+        self.unlock()
+        self.new_password()
+        other = APIClient()
+        self.login(other)
+        self.unlock(other)
+        with patch("users.biometrics.extract_encoding", return_value=[0.5] * 128):
+            result = self.client.post(
+                "/api/users/image-upload/",
+                {"image": SimpleUploadedFile("new.png", b"fixture")},
+            )
+        self.assertEqual(result.status_code, 201)
+        self.assertEqual(
+            json.loads(
+                decrypt(
+                    BiometricTemplate.objects.get(user=self.a).encoding,
+                    "BIOMETRIC_ENCRYPTION_KEY",
+                )
+            ),
+            [0.5] * 128,
+        )
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+        self.assertEqual(other.get("/api/users/passwords/").status_code, 403)
+        self.assertEqual(other.post("/api/users/image-upload/").status_code, 403)
+        self.assertNotIn("vault_factor", self.client.session)
+        self.assertNotIn("vault_until", self.client.session)
+        with patch("users.biometrics.extract_encoding", return_value=[0.1] * 128):
+            self.assertEqual(
+                self.client.post(
+                    "/api/users/verify-face/",
+                    {"image": SimpleUploadedFile("old.png", b"fixture")},
+                ).status_code,
+                400,
+            )
+        with patch("users.biometrics.extract_encoding", return_value=[0.5] * 128):
+            self.assertEqual(
+                self.client.post(
+                    "/api/users/verify-face/",
+                    {"image": SimpleUploadedFile("new.png", b"fixture")},
+                ).status_code,
+                200,
+            )
+        self.assertEqual(len(self.client.get("/api/users/passwords/").data), 1)
+
+    def test_face_grant_is_five_minutes_and_old_non_face_grants_fail_closed(self):
+        with patch("users.views.time", return_value=time()) as clock:
+            self.unlock()
+            self.assertEqual(
+                self.client.session["vault_until"], clock.return_value + 300
+            )
+        self.assertEqual(self.client.session["vault_factor"], "face")
+        session = self.client.session
+        session["vault_factor"] = "retired-factor"
+        session.save()
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+        self.assertEqual(self.client.post("/api/users/image-upload/").status_code, 403)
+
+    def test_lock_and_logout_clear_temporary_enrollment_authorization(self):
+        for endpoint in ["lock", "logout"]:
+            with self.subTest(endpoint=endpoint):
+                self.login()
+                self.assertEqual(
+                    self.client.post(
+                        "/api/users/confirm-password/", {"password": PASS}
+                    ).status_code,
+                    200,
+                )
+                old_key = self.client.session.session_key
+                self.assertEqual(
+                    self.client.post(f"/api/users/{endpoint}/").status_code, 200
+                )
+                for key in [
+                    "face_enrollment_password_confirmed_until",
+                    "vault_until",
+                    "vault_factor",
+                    "vault_face_version",
+                ]:
+                    self.assertNotIn(key, self.client.session)
+                if endpoint == "logout":
+                    from django.contrib.sessions.models import Session
+
+                    self.assertFalse(
+                        Session.objects.filter(session_key=old_key).exists()
+                    )
+
+    def test_invalid_enrollment_image_does_not_create_template(self):
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/users/image-upload/",
+                {"image": SimpleUploadedFile("bad.png", b"invalid")},
+            ).status_code,
+            400,
+        )
+        self.assertFalse(BiometricTemplate.objects.filter(user=self.a).exists())
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+
+    def test_confirmation_accepts_exact_existing_password_without_strength_rules(self):
+        self.a.set_password(" x ")
+        self.a.save()
+        self.assertEqual(
+            self.client.post(
+                "/api/users/login/", {"email": self.a.email, "password": " x "}
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": " x "}
+            ).status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": "x"}
+            ).status_code,
+            400,
+        )
+        self.assertNotIn(
+            "face_enrollment_password_confirmed_until", self.client.session
+        )
+
+    def test_no_face_user_cannot_unlock_with_login_or_password_confirmation(self):
+        self.new_password()
+        self.assertEqual(
+            self.client.post(
+                "/api/users/confirm-password/", {"password": PASS}
+            ).status_code,
+            200,
+        )
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)
+        result = self.client.post("/api/users/verify-face/")
+        self.assertEqual(result.status_code, 404)
+        self.assertEqual(
+            result.data,
+            {"detail": "Set up face verification before unlocking your vault."},
+        )
+        self.assertNotIn("vault_until", self.client.session)
+        self.assertEqual(self.client.get("/api/users/passwords/").status_code, 403)

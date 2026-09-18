@@ -12,7 +12,7 @@ from .fields import decrypt
 
 class BiometricUnavailable(APIException):
     status_code = 503
-    default_detail = "Face verification is unavailable. Use an email code."
+    default_detail = "Face verification is unavailable. Please try again."
 
 
 def extract_encoding(upload):

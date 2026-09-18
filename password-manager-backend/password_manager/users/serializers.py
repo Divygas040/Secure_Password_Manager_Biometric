@@ -83,13 +83,9 @@ class LoginSerializer(serializers.Serializer):
         return value.strip().lower()
 
 
-class OTPSerializer(serializers.Serializer):
-    otp = serializers.RegexField(
-        r"\A[0-9]{6}\Z",
-        min_length=6,
-        max_length=6,
-        trim_whitespace=False,
-        error_messages={"invalid": "Enter exactly 6 ASCII digits."},
+class PasswordConfirmationSerializer(serializers.Serializer):
+    password = serializers.CharField(
+        min_length=1, max_length=128, trim_whitespace=False, write_only=True
     )
 
 

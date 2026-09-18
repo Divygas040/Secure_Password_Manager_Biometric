@@ -1,15 +1,9 @@
-"""Validation boundaries and mocked HTTPS mail transport; never sends real mail."""
+"""Account and vault input validation boundaries."""
 
-import json
-import os
-import subprocess
-import sys
 from datetime import timedelta
 from unittest.mock import patch
 
-import requests
-from django.conf import settings
-from django.test import TestCase, SimpleTestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
 
@@ -18,7 +12,7 @@ from .models import CustomUser, RateLimitBucket
 from .serializers import (
     UserSignupSerializer,
     LoginSerializer,
-    OTPSerializer,
+    PasswordConfirmationSerializer,
     PasswordSerializer,
 )
 from .throttles import DatabaseThrottle, RATES
@@ -117,20 +111,15 @@ class InputValidationTests(TestCase):
             self.assertFalse(s.is_valid())
             self.assertIn("password", s.errors)
 
-    def test_otp_requires_exactly_six_ascii_digits(self):
-        for value in [
-            "",
-            "12345",
-            "1234567",
-            "１２３４５６",
-            "12345a",
-            "123456\n",
-            " 123456",
-        ]:
-            s = OTPSerializer(data={"otp": value})
-            self.assertFalse(s.is_valid())
-            self.assertIn("otp", s.errors)
-        self.assertTrue(OTPSerializer(data={"otp": "123456"}).is_valid())
+    def test_confirmation_preserves_existing_password_and_enforces_limits(self):
+        for value in ["x", "  existing  ", "x" * 128]:
+            serializer = PasswordConfirmationSerializer(data={"password": value})
+            self.assertTrue(serializer.is_valid(), serializer.errors)
+            self.assertEqual(serializer.validated_data["password"], value)
+            self.assertNotIn("password", serializer.data)
+        for value in ["", "x" * 129]:
+            serializer = PasswordConfirmationSerializer(data={"password": value})
+            self.assertFalse(serializer.is_valid())
 
     def test_vault_names_and_password_preservation(self):
         for value in ["", "  ", "a" * 256, "\u200b\u200d", "\x01\x02"]:
@@ -196,89 +185,6 @@ class InputValidationTests(TestCase):
         self.assertEqual(response.data, {"detail": "Invalid credentials."})
 
 
-@override_settings(
-    EMAIL_BACKEND="anymail.backends.resend.EmailBackend",
-    DEFAULT_FROM_EMAIL="BioPass <security@biopassmanager.online>",
-)
-class ResendDeliveryTests(TestCase):
-    def setUp(self):
-        # No provider key is needed: HTTP is mocked before sending any request.
-        self.mail_settings = override_settings(
-            ANYMAIL={"RESEND_API_KEY": "", "REQUESTS_TIMEOUT": 15}
-        )
-        self.mail_settings.enable()
-        self.addCleanup(self.mail_settings.disable)
-        self.user = CustomUser.objects.create_user(
-            "mail-user",
-            email="mail@example.invalid",
-            phone="1234567890",
-            password="Transport-fixture!42",
-        )
-        self.client = APIClient()
-        result = self.client.post(
-            "/api/users/login/",
-            {"email": self.user.email, "password": "Transport-fixture!42"},
-        )
-        self.assertEqual(result.status_code, 200)
-
-    def test_send_mail_uses_resend_https_and_preserves_otp_flow(self):
-        response = requests.Response()
-        response.status_code = 200
-        response._content = b'{"id":"mock-message-id"}'
-        with patch("requests.Session.request", return_value=response) as transport:
-            result = self.client.post("/api/users/send-otp-email/")
-        self.assertEqual(result.status_code, 200)
-        params = transport.call_args.kwargs
-        self.assertEqual(params["url"], "https://api.resend.com/emails")
-        self.assertEqual(params["timeout"], 15)
-        payload = json.loads(params["data"])
-        self.assertEqual(payload["from"], settings.DEFAULT_FROM_EMAIL)
-        self.assertEqual(payload["to"], [self.user.email])
-        import re
-
-        code = re.search(r"\b[0-9]{6}\b", payload["text"]).group()
-        self.assertNotIn(code, result.content.decode())
-        self.user.refresh_from_db()
-        self.assertNotEqual(self.user.otp_digest, code)
-        self.assertTrue(self.user.otp_session)
-        self.assertIsNone(self.user.otp_generated)
-        self.assertEqual(
-            self.client.post("/api/users/verify-otp/", {"otp": code}).status_code, 200
-        )
-        self.assertEqual(
-            self.client.post("/api/users/verify-otp/", {"otp": code}).status_code, 400
-        )
-
-    def test_resend_http_failure_is_generic_and_invalidates_challenge(self):
-        response = requests.Response()
-        response.status_code = 403
-        response._content = b'{"message":"private-provider-detail"}'
-        with patch("requests.Session.request", return_value=response):
-            result = self.client.post("/api/users/send-otp-email/")
-        self.assertEqual(result.status_code, 503)
-        self.assertEqual(
-            result.data, {"detail": "Email could not be delivered. Try again later."}
-        )
-        self.user.refresh_from_db()
-        self.assertEqual(self.user.otp_digest, "")
-        self.assertIsNone(self.user.otp_expires_at)
-
-    @override_settings(CORS_ALLOWED_ORIGINS=["https://www.biopassmanager.online"])
-    def test_cooldown_reports_remaining_seconds(self):
-        now = timezone.now()
-        self.user.otp_sent_at = now - timedelta(seconds=45)
-        self.user.save(update_fields=["otp_sent_at"])
-        with patch("users.views.timezone.now", return_value=now):
-            response = self.client.post(
-                "/api/users/send-otp-email/",
-                HTTP_ORIGIN="https://www.biopassmanager.online",
-            )
-        self.assertEqual(response.status_code, 429)
-        self.assertEqual(response["Retry-After"], "15")
-        self.assertIn("Retry-After", response["Access-Control-Expose-Headers"])
-        self.assertEqual(response.data["retry_after"], 15)
-
-
 class ThrottleWaitTests(TestCase):
     def test_remaining_window_and_reset(self):
         from django.contrib.auth.models import AnonymousUser
@@ -301,45 +207,3 @@ class ThrottleWaitTests(TestCase):
             "users.throttles.timezone.now", return_value=now + timedelta(seconds=60)
         ):
             self.assertTrue(throttle.allow_request(request, view))
-
-
-class EmailSettingsTests(SimpleTestCase):
-    def test_missing_resend_key_and_unsafe_production_backends_fail_closed(self):
-        base = {
-            **os.environ,
-            "DJANGO_SECRET_KEY": settings.SECRET_KEY,
-            "VAULT_ENCRYPTION_KEY": settings.VAULT_ENCRYPTION_KEY,
-            "BIOMETRIC_ENCRYPTION_KEY": settings.BIOMETRIC_ENCRYPTION_KEY,
-            "DEBUG": "False",
-            "ALLOWED_HOSTS": "api.example.com",
-            "CORS_ALLOWED_ORIGINS": "https://example.com",
-            "CSRF_TRUSTED_ORIGINS": "https://example.com",
-            "DATABASE_URL": "postgres://localhost/unused",
-            "RESEND_API_KEY": "",
-        }
-        for backend in [
-            "anymail.backends.resend.EmailBackend",
-            "django.core.mail.backends.console.EmailBackend",
-            "django.core.mail.backends.dummy.EmailBackend",
-            "django.core.mail.backends.locmem.EmailBackend",
-        ]:
-            result = subprocess.run(
-                [sys.executable, "-c", "import password_manager.settings"],
-                cwd=settings.BASE_DIR,
-                env={**base, "EMAIL_BACKEND": backend},
-                capture_output=True,
-            )
-            self.assertNotEqual(result.returncode, 0)
-        result = subprocess.run(
-            [sys.executable, "-c", "import password_manager.settings"],
-            cwd=settings.BASE_DIR,
-            env={
-                **base,
-                "DEBUG": "True",
-                "EMAIL_BACKEND": "django.core.mail.backends.console.EmailBackend",
-            },
-            capture_output=True,
-        )
-        self.assertEqual(
-            result.returncode, 0, "Local console configuration failed; output withheld."
-        )

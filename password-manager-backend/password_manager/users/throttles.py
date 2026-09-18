@@ -10,8 +10,7 @@ RATES = {
     "api": (120, 60),
     "login": (10, 300),
     "signup": (5, 3600),
-    "otp_send": (5, 3600),
-    "otp_verify": (15, 300),
+    "password_confirm": (5, 300),
     "face": (10, 300),
 }
 

@@ -1,33 +1,28 @@
 import json
-import secrets
-from math import ceil
-from datetime import timedelta
 from time import time
 
 from django.conf import settings
 from django.contrib.auth import login, logout
 from django.contrib.auth.hashers import make_password
-from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.middleware.csrf import get_token, rotate_token
-from django.utils import timezone
-from django.utils.crypto import constant_time_compare, salted_hmac
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.debug import sensitive_post_parameters
 from rest_framework import generics
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import biometrics
 from .models import CustomUser, Password, BiometricTemplate
-from .permissions import VaultUnlocked, OTPVerified
+from .permissions import VaultUnlocked
 from .serializers import (
     UserSignupSerializer,
     LoginSerializer,
-    OTPSerializer,
+    PasswordConfirmationSerializer,
     UserSerializer,
     PasswordSerializer,
     PasswordReadSerializer,
@@ -44,9 +39,7 @@ def health(request):
     return JsonResponse({"status": "ok"})
 
 
-@method_decorator(
-    sensitive_post_parameters("password", "otp", "image"), name="dispatch"
-)
+@method_decorator(sensitive_post_parameters("password", "image"), name="dispatch")
 @method_decorator(csrf_protect, name="dispatch")
 class ProtectedAPIView(APIView):
     """Enforce CSRF even on anonymous login/signup endpoints."""
@@ -131,122 +124,48 @@ class UserDetailView(ProtectedAPIView):
 
 class LockView(ProtectedAPIView):
     def post(self, request):
-        request.session.pop("vault_until", None)
-        request.session.pop("vault_factor", None)
+        clear_temporary_authorization(request)
         return Response({"message": "Vault locked."})
 
 
-def session_digest(request):
-    return salted_hmac("otp-session", request.session.session_key or "").hexdigest()
+def clear_temporary_authorization(request):
+    for key in (
+        "vault_until",
+        "vault_factor",
+        "vault_face_version",
+        "face_enrollment_password_confirmed_until",
+    ):
+        request.session.pop(key, None)
 
 
-def otp_digest(user_id, session, code):
-    return salted_hmac(
-        "vault-email-code", f"{user_id}:{session}:{code}", algorithm="sha256"
-    ).hexdigest()
-
-
-def unlock(request, factor):
-    request.session["vault_until"] = time() + settings.VAULT_UNLOCK_SECONDS
-    request.session["vault_factor"] = factor
-
-
-class SendOTPView(ProtectedAPIView):
-    throttle_scope = "otp_send"
+class ConfirmPasswordView(ProtectedAPIView):
+    throttle_scope = "password_confirm"
 
     def post(self, request):
-        now = timezone.now()
+        request.session.pop("face_enrollment_password_confirmed_until", None)
+        serializer = PasswordConfirmationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # Serialize enrollment/confirmation for this account; never select a user
+        # from client-supplied email or username fields.
         with transaction.atomic():
-            user = CustomUser.objects.select_for_update().get(pk=request.user.pk)
-            if (
-                user.otp_sent_at
-                and (now - user.otp_sent_at).total_seconds()
-                < settings.OTP_RESEND_SECONDS
-            ):
-                wait = max(
-                    1,
-                    ceil(
-                        settings.OTP_RESEND_SECONDS
-                        - (now - user.otp_sent_at).total_seconds()
-                    ),
-                )
+            CustomUser.objects.select_for_update().get(pk=request.user.pk)
+            if not request.user.check_password(serializer.validated_data["password"]):
+                return Response({"detail": "Password confirmation failed."}, status=400)
+            if BiometricTemplate.objects.filter(user=request.user).exists():
                 return Response(
                     {
-                        "detail": "Wait before requesting another code.",
-                        "retry_after": wait,
+                        "detail": "Verify your current face before replacing face enrollment."
                     },
-                    status=429,
-                    headers={"Retry-After": str(wait)},
+                    status=403,
                 )
-            code = f"{secrets.randbelow(1_000_000):06d}"
-            user.otp_session = session_digest(request)
-            user.otp_digest = otp_digest(user.pk, user.otp_session, code)
-            user.otp_expires_at = now + timedelta(seconds=settings.OTP_TTL_SECONDS)
-            user.otp_sent_at, user.otp_attempts = now, 0
-            user.otp_secret = user.otp_generated = None
-            user.save(
-                update_fields=[
-                    "otp_session",
-                    "otp_digest",
-                    "otp_expires_at",
-                    "otp_sent_at",
-                    "otp_attempts",
-                    "otp_secret",
-                    "otp_generated",
-                ]
+            request.session["face_enrollment_password_confirmed_until"] = (
+                time() + settings.FACE_ENROLLMENT_CONFIRM_SECONDS
             )
-            digest = user.otp_digest
-        try:
-            delivered = send_mail(
-                "Your BioPass verification code",
-                f"Your verification code is {code}. It expires in five minutes.",
-                settings.DEFAULT_FROM_EMAIL,
-                [user.email],
-                fail_silently=False,
-            )
-            if delivered != 1:
-                raise RuntimeError
-        except Exception:
-            CustomUser.objects.filter(pk=user.pk, otp_digest=digest).update(
-                otp_digest="", otp_expires_at=None
-            )
-            return Response(
-                {"detail": "Email could not be delivered. Try again later."}, status=503
-            )
-        return Response({"message": "A verification code has been sent."})
-
-
-class VerifyOTPView(ProtectedAPIView):
-    throttle_scope = "otp_verify"
-
-    def post(self, request):
-        serializer = OTPSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        with transaction.atomic():
-            user = CustomUser.objects.select_for_update().get(pk=request.user.pk)
-            valid = (
-                user.otp_digest
-                and user.otp_expires_at
-                and user.otp_expires_at > timezone.now()
-                and user.otp_attempts < settings.OTP_MAX_ATTEMPTS
-                and constant_time_compare(user.otp_session, session_digest(request))
-                and constant_time_compare(
-                    user.otp_digest,
-                    otp_digest(
-                        user.pk, user.otp_session, serializer.validated_data["otp"]
-                    ),
-                )
-            )
-            user.otp_attempts = min(user.otp_attempts + 1, settings.OTP_MAX_ATTEMPTS)
-            if valid or user.otp_attempts >= settings.OTP_MAX_ATTEMPTS:
-                user.otp_digest, user.otp_expires_at = "", None
-            user.save(update_fields=["otp_attempts", "otp_digest", "otp_expires_at"])
-        if not valid:
-            return Response(
-                {"detail": "Invalid or expired verification code."}, status=400
-            )
-        unlock(request, "otp")
-        return Response({"message": "Vault unlocked for five minutes."})
+        return Response(
+            {
+                "message": "Password confirmed. Set up face verification within five minutes."
+            }
+        )
 
 
 class PasswordListView(generics.ListCreateAPIView):
@@ -288,32 +207,58 @@ class FaceStatusView(ProtectedAPIView):
 
 
 class FaceEnrollView(ProtectedAPIView):
-    permission_classes = [IsAuthenticated, OTPVerified]
     throttle_scope = "face"
 
     def post(self, request):
-        encoding = biometrics.extract_encoding(request.FILES.get("image"))
+        # Recheck authorization while holding the account lock so two concurrent
+        # first-enrollment requests cannot silently become a replacement.
         with transaction.atomic():
             CustomUser.objects.select_for_update().get(pk=request.user.pk)
+            template = BiometricTemplate.objects.filter(user=request.user).first()
+            if template is None:
+                if (
+                    request.session.get("face_enrollment_password_confirmed_until", 0)
+                    <= time()
+                ):
+                    raise PermissionDenied(
+                        "Confirm your password before setting up face verification."
+                    )
+            else:
+                request.session.pop("face_enrollment_password_confirmed_until", None)
+                if not VaultUnlocked().has_permission(request, self):
+                    raise PermissionDenied(
+                        "Verify your current face before replacing face enrollment."
+                    )
+            encoding = biometrics.extract_encoding(request.FILES.get("image"))
             BiometricTemplate.objects.update_or_create(
                 user=request.user, defaults={"encoding": json.dumps(encoding)}
             )
-        return Response({"message": "Face verification enrolled."}, status=201)
+            clear_temporary_authorization(request)
+        return Response(
+            {
+                "message": "Face verification is set up. Verify your face to unlock the vault."
+            },
+            status=201,
+        )
 
 
 class FaceVerifyView(ProtectedAPIView):
     throttle_scope = "face"
 
     def post(self, request):
-        template = BiometricTemplate.objects.filter(user=request.user).first()
-        if template is None:
-            return Response(
-                {"detail": "No face template enrolled. Use an email code."}, status=404
-            )
-        encoding = biometrics.extract_encoding(request.FILES.get("image"))
-        if not biometrics.matches(template.encoding, encoding):
-            return Response(
-                {"detail": "Face verification failed. Try an email code."}, status=400
-            )
-        unlock(request, "face")
+        clear_temporary_authorization(request)
+        with transaction.atomic():
+            CustomUser.objects.select_for_update().get(pk=request.user.pk)
+            template = BiometricTemplate.objects.filter(user=request.user).first()
+            if template is None:
+                return Response(
+                    {"detail": "Set up face verification before unlocking your vault."},
+                    status=404,
+                )
+            encoding = biometrics.extract_encoding(request.FILES.get("image"))
+            if not biometrics.matches(template.encoding, encoding):
+                return Response({"detail": "Face verification failed."}, status=400)
+            request.session["vault_until"] = time() + settings.VAULT_UNLOCK_SECONDS
+            request.session["vault_factor"] = "face"
+            request.session["vault_face_version"] = template.updated_at.isoformat()
         return Response({"message": "Vault unlocked for five minutes."})

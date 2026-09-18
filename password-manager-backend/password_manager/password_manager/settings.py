@@ -193,52 +193,7 @@ FILE_UPLOAD_HANDLERS = ["django.core.files.uploadhandler.MemoryFileUploadHandler
 MAX_FACE_IMAGE_BYTES = 2 * 1024 * 1024
 MAX_FACE_IMAGE_PIXELS = 4_000_000
 VAULT_UNLOCK_SECONDS = 300
-OTP_TTL_SECONDS = 300
-OTP_RESEND_SECONDS = 60
-OTP_MAX_ATTEMPTS = 5
-EMAIL_BACKEND = env(
-    "EMAIL_BACKEND",
-    default=(
-        "django.core.mail.backends.smtp.EmailBackend"
-        if DEBUG
-        else "anymail.backends.resend.EmailBackend"
-    ),
-)
-if not DEBUG and EMAIL_BACKEND in (
-    "django.core.mail.backends.console.EmailBackend",
-    "django.core.mail.backends.filebased.EmailBackend",
-    "django.core.mail.backends.dummy.EmailBackend",
-    "django.core.mail.backends.locmem.EmailBackend",
-):
-    raise ImproperlyConfigured("Production requires a real delivery email backend.")
-EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")
-EMAIL_PORT = env.int("EMAIL_PORT", default=587)
-EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
-EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
-EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
-EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
-DEFAULT_FROM_EMAIL = env(
-    "DEFAULT_FROM_EMAIL",
-    default=(
-        "BioPass <security@biopassmanager.online>"
-        if EMAIL_BACKEND == "anymail.backends.resend.EmailBackend"
-        else EMAIL_HOST_USER
-    ),
-)
-ANYMAIL = {"RESEND_API_KEY": env("RESEND_API_KEY", default=""), "REQUESTS_TIMEOUT": 15}
-if EMAIL_BACKEND == "anymail.backends.resend.EmailBackend" and not (
-    ANYMAIL["RESEND_API_KEY"].strip() and DEFAULT_FROM_EMAIL.strip()
-):
-    raise ImproperlyConfigured("Resend requires RESEND_API_KEY and DEFAULT_FROM_EMAIL.")
-if (
-    not DEBUG
-    and EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend"
-    and not (EMAIL_HOST_USER and EMAIL_HOST_PASSWORD and DEFAULT_FROM_EMAIL)
-):
-    raise ImproperlyConfigured(
-        "Production SMTP requires EMAIL_HOST_USER, EMAIL_HOST_PASSWORD and DEFAULT_FROM_EMAIL."
-    )
-EMAIL_TIMEOUT = 15
+FACE_ENROLLMENT_CONFIRM_SECONDS = 300
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
