@@ -17,7 +17,7 @@ services:
       - key: TRUST_PROXY_HTTPS
         value: "True"
       - key: COOKIE_SAMESITE
-        value: "None"
+        value: "Lax"
       - key: SECURE_HSTS_SECONDS
         value: "0"
       - key: DJANGO_SECRET_KEY
