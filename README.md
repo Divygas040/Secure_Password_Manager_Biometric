@@ -8,6 +8,14 @@ This is an educational demo. Use synthetic credentials. Camera-based verificatio
 has **no liveness or anti-spoofing detection** and is not equivalent to Apple Face ID,
 passkeys or production-grade biometric identity assurance.
 
+## Live demo
+
+**Production:** https://www.biopassmanager.online/
+
+The live deployment uses Vercel for the Next.js frontend, Render for the Django API,
+and PostgreSQL for persistent storage. Use only synthetic/test credentials when
+trying the public demo.
+
 ## Architecture and authorization
 
 ```text
@@ -109,5 +117,8 @@ production environment. Frontend: `npm ci`, `npm test`, `npm run lint`, `npm run
 - [Validation results](docs/VALIDATION.md)
 - [Original baseline audit](docs/BASELINE_AUDIT.md)
 
-No deployment, purchase, account change or billing operation is performed by this
-branch. Review and deploy through your normal process after validation.
+## Production status
+
+The project is deployed at **https://www.biopassmanager.online/**. The public demo is
+intended for portfolio and educational use; do not store real passwords or sensitive
+personal credentials.
